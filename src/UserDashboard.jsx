@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, LogOut, Star, ArrowLeft, Settings, Bell, MapPin, Trash2, Edit3, X, Camera, ShieldAlert, Phone, Clock, Eye, Heart, RefreshCw, Link, AlertTriangle } from 'lucide-react';
 
@@ -38,6 +38,9 @@ export default function UserDashboard() {
   const [renewRoom, setRenewRoom] = useState(null);
   const [renewPlan, setRenewPlan] = useState('7');
   const [renewRef, setRenewRef] = useState('');
+  // 💳 P0 fix: UPI note ka code — server bhi yahi save karega (admin ko wahi dikhega)
+  const [renewCode, setRenewCode] = useState('');
+  const renewCodeRoomRef = useRef(null); // same room reopen par wahi code reuse
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sysSettings, setSysSettings] = useState({ facilities: ['Wi-Fi', 'AC', 'Water 24x7', 'Electricity', 'Geyser', 'RO Water', 'Parking', 'CCTV', 'Meals', 'Attached Washroom'] });
 
@@ -159,6 +162,14 @@ export default function UserDashboard() {
   };
   const renewUpiId = (sysSettings.pricing && sysSettings.pricing.upiId) || 'admin@ybl';
 
+  // 💳 Renew modal kholo — code strategy: SAME room dobara kholo toh WAHI code
+  // (paid-then-cancel safe), naya room toh naya code. Server bhi yahi save karega.
+  const openRenewModal = (room, plan) => {
+    setRenewRoom(room); setRenewPlan(plan); setRenewRef('');
+    setRenewCode(prev => (renewCodeRoomRef.current === room._id && prev) ? prev : 'RK-' + Math.random().toString(36).substr(2, 5).toUpperCase());
+    renewCodeRoomRef.current = room._id;
+  };
+
   const submitRenew = async () => {
     if (!renewRoom) return;
     if (!renewRef.trim()) return alert('UPI Ref / UTR No. daliye (payment ke baad milta hai).');
@@ -167,11 +178,11 @@ export default function UserDashboard() {
       const res = await fetch(`${BASE_URL}/api/rooms/${renewRoom._id}/renew`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ promoPlan: renewPlan, paymentRef: renewRef.trim() })
+        body: JSON.stringify({ promoPlan: renewPlan, paymentRef: renewRef.trim(), paymentCode: renewCode })
       });
       const data = await res.json();
-      alert(data.message);
-      if (data.success) { setRenewRoom(null); setRenewRef(''); setRefreshKey(k => k + 1); }
+      alert(data.message || (data.success ? 'Done!' : 'Renew request nahi bhej paaye. Dobara try karein.'));
+      if (data.success) { setRenewRoom(null); setRenewRef(''); setRenewCode(''); renewCodeRoomRef.current = null; setRefreshKey(k => k + 1); }
     } catch { alert('Server connection failed.'); }
     setIsSubmitting(false);
   };
@@ -307,8 +318,8 @@ export default function UserDashboard() {
                           <button onClick={() => toggleRoomStatus(room._id)} className="text-[10px] font-bold text-gray-500 border border-gray-200 bg-gray-50 px-3 py-1.5 rounded-lg active:scale-95 transition-colors hover:bg-gray-100">Hide/Show</button>
                           <div className="flex gap-2">
                             {/* 🔄 RENEW BUTTON (expired promo par) */}
-                            {isExpired && (<button onClick={() => { setRenewRoom(room); setRenewPlan(room.promoPlan && room.promoPlan !== 'regular' ? room.promoPlan : '7'); setRenewRef(''); }} className="text-[11px] font-black text-white bg-orange-500 px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1"><RefreshCw size={12} /> Renew</button>)}
-                            {!room.isPromoted && !isExpired && (<button onClick={() => { setRenewRoom(room); setRenewPlan('7'); setRenewRef(''); }} className="text-[11px] font-black text-white bg-brand px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1"><Star size={12} fill="currentColor" /> Promote</button>)}
+                            {isExpired && (<button onClick={() => openRenewModal(room, room.promoPlan && room.promoPlan !== 'regular' ? room.promoPlan : '7')} className="text-[11px] font-black text-white bg-orange-500 px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1"><RefreshCw size={12} /> Renew</button>)}
+                            {!room.isPromoted && !isExpired && (<button onClick={() => openRenewModal(room, '7')} className="text-[11px] font-black text-white bg-brand px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1"><Star size={12} fill="currentColor" /> Promote</button>)}
                             {/* 🚨 EDIT BUTTON */}
                             <button onClick={() => openEditModal(room)} className="text-[11px] font-black text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1 transition-colors hover:bg-blue-100"><Edit3 size={14}/> Edit</button>
                             <button onClick={() => deleteRoom(room._id)} className="text-[11px] font-black text-red-600 bg-red-50 p-1.5 px-3 rounded-lg active:scale-95 flex items-center gap-1 transition-colors hover:bg-red-100"><Trash2 size={14}/> Delete</button>
@@ -335,7 +346,7 @@ export default function UserDashboard() {
                 <button key={d} onClick={() => setRenewPlan(d)} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${renewPlan === d ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>{d} Days<br /><span className="text-lg">₹{renewPrice(d)}</span></button>
               ))}
             </div>
-            <a href={`upi://pay?pa=${renewUpiId}&pn=RoomKhojo&am=${renewPrice(renewPlan)}&cu=INR&tn=Renew: ${renewRoom.paymentCode}`} className="w-full bg-brand text-white py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 mb-3 shadow-lg active:scale-95">Pay ₹{renewPrice(renewPlan)} via UPI App</a>
+            <a href={`upi://pay?pa=${renewUpiId}&pn=RoomKhojo&am=${renewPrice(renewPlan)}&cu=INR&tn=Renew: ${renewCode}`} className="w-full bg-brand text-white py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 mb-3 shadow-lg active:scale-95">Pay ₹{renewPrice(renewPlan)} via UPI App</a>
             <input type="text" value={renewRef} onChange={(e) => setRenewRef(e.target.value)} placeholder="UPI Ref / UTR No. (payment ke baad milta hai)" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border mb-3" />
             <button onClick={submitRenew} disabled={isSubmitting} className="w-full bg-green-600 text-white py-4 rounded-2xl font-black active:scale-95">{isSubmitting ? 'Bhej rahe hain...' : 'I have paid — Send for Verification'}</button>
           </div>

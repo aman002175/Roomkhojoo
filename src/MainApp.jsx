@@ -173,6 +173,7 @@ export default function MainApp() {
   const map = useRef(null); 
   const markersRef = useRef([]);
   const userLocMarkerRef = useRef(null); 
+  const submitLockRef = useRef(false); // 🚫 double-submit guard (duplicate ads rokne ke liye)
 
   const [view, setView] = useState('map'); 
   const [selectedRoom, setSelectedRoom] = useState(null);
@@ -461,14 +462,19 @@ export default function MainApp() {
     if(!postLng || !postLat) return alert("Kripya map par location select karein! 'Map' button par click karein ya Live Location chunein.");
     const amount = getPayAmount();
     if (amount === '0' || amount === '') {
+      // ✅ P0 fix: bina confirm ke publish nahi (free bhi)
+      if (!window.confirm('Ad publish karna hai? Confirm karein.')) return;
       submitAd(); 
     } else {
-      const code = makePayCode();
-      setPayCode(code); setShowPaymentWindow(true);
+      // 🔁 P0 fix: same ad ka same code reuse — cancel ke baad naya code na bane (payment mismatch na ho)
+      if (!payCode) setPayCode(makePayCode());
+      setShowPaymentWindow(true);
     }
   };
 
   const submitAd = async () => {
+    if (submitLockRef.current) return; // 🚫 P0 fix: double-tap par 2 ads nahi
+    submitLockRef.current = true;
     setIsSubmitting(true);
     try {
       const fd = new FormData();
@@ -477,19 +483,25 @@ export default function MainApp() {
       fd.append('lng', postLng); fd.append('lat', postLat); fd.append('isPromoted', adType === 'promo');
       fd.append('promoPlan', adType === 'promo' ? promoPlan : 'regular');
       fd.append('paymentRef', payRef.trim());
+      if (payCode) fd.append('paymentCode', payCode); // 💳 P0 fix: UPI note wala HI code server ko (admin ko wahi dikhega)
       fd.append('bannerRequested', wantBanner);
       fd.append('bannerRef', payRef.trim());
       fd.append('landmarks', JSON.stringify(poiSelected));
       postImages.forEach(p => fd.append('images', p.file));
 
-      // NOTE: userId/ownerName/paymentCode server token se leta hai (spoof-proof).
-      const res = await fetch(API_URL, { method: 'POST', headers: authHeaders(), body: fd }); const data = await res.json();
-      if(data.success) { 
+      // NOTE: userId/ownerName server token se leta hai (spoof-proof).
+      const res = await fetch(API_URL, { method: 'POST', headers: authHeaders(), body: fd }); 
+      const data = await res.json().catch(() => null);
+      if(data && data.success) { 
         alert(data.message || 'Ad submitted!'); 
-        setIsPostAdOpen(false); setShowPaymentWindow(false); setPostTitle(''); setPostPrice(''); setPostMobile(''); setSelectedFacilities([]); setPostLng(null); setPostLat(null); clearPostPhotos(); setPayRef(''); setWantBanner(false); setPoiSelected([]); 
+        setIsPostAdOpen(false); setShowPaymentWindow(false); setPostTitle(''); setPostPrice(''); setPostMobile(''); setSelectedFacilities([]); setPostLng(null); setPostLat(null); clearPostPhotos(); setPayRef(''); setPayCode(''); setWantBanner(false); setPoiSelected([]); 
+      } else {
+        // ⚠️ P0 fix: fail par SILENT nahi — asli reason dikhao
+        alert((data && data.message) || `Ad submit nahi hua (error ${res.status}). Dobara try karein.`);
       }
     } catch { alert("Server connection failed."); }
     setIsSubmitting(false);
+    submitLockRef.current = false;
   };
 
   useEffect(() => {
