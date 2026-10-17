@@ -177,6 +177,9 @@ export default function MainApp() {
   const submitLockRef = useRef(false); // 🚫 double-submit guard (duplicate ads rokne ke liye)
   const submitAbortRef = useRef(null); // 🛑 P1 #35: cancel-able submit (AbortController)
   const submitCanceledRef = useRef(false); // user ne khud cancel kiya? (timeout se farq)
+  const pendingActionRef = useRef(null); // P2 #36: guest ka adhoora kaam (login ke baad resume)
+  const suppressPopstateRef = useRef(false); // P2 #39: apna hi back() detect na ho
+  const pendingFlyToRef = useRef(null); // P2 #38: map ready hone se pehle ka fly target
   const geoWatchIdRef = useRef(null); // 📍 blue-dot live watch id (unmount par clearWatch — P1 #27)
 
   const [view, setView] = useState('map'); 
@@ -224,6 +227,7 @@ export default function MainApp() {
   const [selectedFacilities, setSelectedFacilities] = useState([]); 
   const [postLandmark, setPostLandmark] = useState('');
   const [postImages, setPostImages] = useState([]); // [{file, url}] max 6 
+  const [isCompressingPhotos, setIsCompressingPhotos] = useState(false); // P2 #37: compress ke dauran UI feedback
   const [postLng, setPostLng] = useState(null);
   const [postLat, setPostLat] = useState(null); 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -278,11 +282,20 @@ export default function MainApp() {
           setRooms(data.rooms);
           // P1 #34: agle offline ke liye cache (1.5MB se bada ho toh skip)
           try { const json = JSON.stringify(data.rooms || []); if (json.length < 1500000) localStorage.setItem('roomkhojo_rooms_cache', json); } catch { /* cache optional */ }
-          // 🔗 Shared link (?room=id) se aaye ho toh popup kholo
+          // 🔗 P2 #38/#39: shared link → popup + map fly; ad na mile toh saaf message (silent nahi)
           const rid = new URLSearchParams(window.location.search).get('room');
           if (rid) {
             const found = (data.rooms || []).find(r => r._id === rid);
-            if (found) { setSelectedRoom(found); markRoomViewed(found); }
+            if (found) {
+              setSelectedRoom(found);
+              markRoomViewed(found);
+              // reload ke waqt duplicate history entry na bane
+              if (!(window.history.state && window.history.state.roomPopup)) window.history.pushState({ roomPopup: true }, '', `?room=${rid}`);
+              flyWhenReady(found.lng, found.lat, 16);
+            } else {
+              alert('Ye ad ab available nahi hai — delete ho gayi ya expire ho chuki hai.');
+              window.history.replaceState(null, '', window.location.pathname);
+            }
           }
         } else setRoomsError(true);
       })
@@ -321,6 +334,10 @@ export default function MainApp() {
     localStorage.setItem('roomkhojo_user', JSON.stringify(userData));
     setIsLoggedIn(true);
     setAuthMode(null);
+    // P2 #36: guest ne Post Ad tap kiya tha → login ke baad form khud khul jaye
+    const pending = pendingActionRef.current;
+    pendingActionRef.current = null;
+    if (pending === 'postAd') openPostAdForm();
   };
 
   // 🔐 P1 #32: kabhi bhi 401 (session expire) → auto logout + login screen
@@ -616,7 +633,15 @@ export default function MainApp() {
   useEffect(() => {
     if (map.current || mapDead) return;
     map.current = new maplibregl.Map({ container: mapContainer.current, style: MAP_STYLE, center: [74.3218, 29.5894], zoom: 13, maxZoom: 19, attributionControl: { compact: true } });
-    map.current.on('load', () => setMapLoaded(true));
+    map.current.on('load', () => {
+      setMapLoaded(true);
+      // P2 #38: rooms map se pehle aa gaye the → pending fly ab
+      if (pendingFlyToRef.current) {
+        const t = pendingFlyToRef.current;
+        pendingFlyToRef.current = null;
+        try { map.current.flyTo({ center: [t.lng, t.lat], zoom: t.zoom || 16 }); } catch { /* map dead → ignore */ }
+      }
+    });
     // 🧹 P1 #28: unmount (ya map dead) par poora map destroy — WebGL context/workers leak na ho
     return () => {
       if (userLocMarkerRef.current) { userLocMarkerRef.current.remove(); userLocMarkerRef.current = null; }
@@ -626,13 +651,31 @@ export default function MainApp() {
     };
   }, [mapDead]);
 
-  // 🧹 P1 #27: geolocation watch unmount par band (battery + memory)
+  // 🛑 P1 #27: geolocation watch unmount par band (battery + memory)
   useEffect(() => () => {
     if (geoWatchIdRef.current !== null) {
       navigator.geolocation.clearWatch(geoWatchIdRef.current);
       geoWatchIdRef.current = null;
     }
   }, []);
+
+  // 🔙 P2 #39: phone back button popup band kare (pushState/popstate sync)
+  useEffect(() => {
+    const onPop = () => {
+      if (suppressPopstateRef.current) {
+        // apna hi history.back() tha (close button) → URL bhi saaf
+        suppressPopstateRef.current = false;
+        setSelectedRoom(null);
+        if (new URLSearchParams(window.location.search).get('room')) window.history.replaceState(null, '', window.location.pathname);
+        return;
+      }
+      const rid = new URLSearchParams(window.location.search).get('room');
+      if (rid) setSelectedRoom(rooms.find(r => r._id === rid) || null);
+      else setSelectedRoom(null);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [rooms]);
 
   // useMemo: har render par nayi array NA banao — warna markers bekaar me rebuild (flicker)
   const filteredRooms = useMemo(() => rooms.filter(r => {
@@ -720,13 +763,54 @@ export default function MainApp() {
     });
   };
 
-  // 📸 Multi-photo picker (max 6) + remove
-  const addPostPhotos = (e) => {
+  // 🗜️ P2 #37: canvas resize — bhaari phone photos (3-8MB) chhoti JPEG me (fast upload)
+  const compressImage = (file, maxDim = 1600, quality = 0.8) => new Promise(resolve => {
+    try {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        try {
+          URL.revokeObjectURL(url);
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob(blob => {
+            if (!blob || blob.size >= file.size) return resolve(file); // chhota tha / fail → original
+            resolve(new File([blob], (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }));
+          }, 'image/jpeg', quality);
+        } catch { resolve(file); }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    } catch { resolve(file); }
+  });
+
+  // 📸 Multi-photo picker (max 6) + compress + object-URL leak-proof (P2 #37)
+  const addPostPhotos = async (e) => {
     const files = Array.from(e.target.files || []);
-    if (postImages.length + files.length > 6) alert('Max 6 photos allowed hai.');
-    const mapped = files.map(f => ({ file: f, url: URL.createObjectURL(f) }));
-    setPostImages(prev => [...prev, ...mapped].slice(0, 6));
-    e.target.value = '';
+    e.target.value = ''; // same file dobara select ho sake
+    if (files.length === 0) return;
+    const room = 6 - postImages.length;
+    if (room <= 0) { alert('Max 6 photos — pehle koi photo hatao.'); return; }
+    let picked = files;
+    if (files.length > room) { alert(`Sirf ${room} aur photo add ho sakti hain (max 6) — baaki skip.`); picked = files.slice(0, room); }
+    setIsCompressingPhotos(true);
+    try {
+      const processed = [];
+      for (const f of picked) {
+        const cf = await compressImage(f);
+        processed.push({ file: cf, url: URL.createObjectURL(cf) });
+      }
+      setPostImages(prev => {
+        const next = [...prev, ...processed];
+        next.slice(6).forEach(p => { if (p.url) URL.revokeObjectURL(p.url); }); // overflow URLs leak na ho
+        return next.slice(0, 6);
+      });
+    } finally {
+      setIsCompressingPhotos(false);
+    }
   };
 
   const removePostPhoto = (idx) => {
@@ -744,18 +828,28 @@ export default function MainApp() {
     });
   };
 
-  // Popup khulne par link me ?room=id lagao (share/copy ke liye)
+  // 📍 P2 #38: map ready ho ya na ho — fly guaranteed (late map ke liye pending)
+  const flyWhenReady = (lng, lat, zoom = 16) => {
+    if (map.current) {
+      try { map.current.flyTo({ center: [lng, lat], zoom }); return; } catch { /* map dead → pending */ }
+    }
+    pendingFlyToRef.current = { lng, lat, zoom };
+  };
+
+  // Popup khulne par link me ?room=id lagao (share/copy ke liye) + back-button history entry (P2 #39)
   const openRoomPopup = (room) => {
     setSelectedRoom(room);
     markRoomViewed(room);
-    if (room && room._id) window.history.replaceState(null, '', `?room=${room._id}`);
+    if (room && room._id) {
+      if (window.history.state && window.history.state.roomPopup) window.history.replaceState({ roomPopup: true }, '', `?room=${room._id}`);
+      else window.history.pushState({ roomPopup: true }, '', `?room=${room._id}`);
+    }
   };
 
   const openBannerRoom = (e) => {
     const b = bannerRooms[Number(e.currentTarget.dataset.roomIdx)];
     if (!b) return;
-    markRoomViewed(b);
-    setSelectedRoom(b);
+    openRoomPopup(b); // P2 #39: URL/history bhi sahi
     setView('map');
     if (map.current) map.current.flyTo({ center: [b.lng, b.lat], zoom: 15.5 });
   };
@@ -943,10 +1037,15 @@ export default function MainApp() {
     }
   };
 
-  // Popup band karo + shared-link param saaf karo
+  // Popup band karo + history/URL sahi karo (P2 #39)
   const closeRoomPopup = () => {
     setSelectedRoom(null);
-    window.history.replaceState(null, '', window.location.pathname);
+    if (window.history.state && window.history.state.roomPopup) {
+      suppressPopstateRef.current = true;
+      window.history.back();
+    } else if (new URLSearchParams(window.location.search).get('room')) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
   };
 
   const handleReportUnavailable = async (roomId) => {
@@ -991,11 +1090,7 @@ export default function MainApp() {
     });
   }, [sortedRooms, selectedRoom]);
 
-  const handlePostAdClick = () => {
-    if (!isLoggedIn) {
-      setAuthMode('login');
-      return;
-    }
+  const openPostAdForm = () => {
     // Form TURANT kholo — location ka 5-sec wait khatam.
     // Location background me best-effort (mil gayi toh pre-pin, nahi toh Map button hai).
     setIsPostAdOpen(true);
@@ -1009,6 +1104,15 @@ export default function MainApp() {
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
       );
     }
+  };
+
+  const handlePostAdClick = () => {
+    if (!isLoggedIn) {
+      pendingActionRef.current = 'postAd'; // P2 #36: login ke baad form khud khulega
+      setAuthMode('login');
+      return;
+    }
+    openPostAdForm();
   };
 
   return (
@@ -1158,7 +1262,7 @@ export default function MainApp() {
              <div className="flex bg-gray-100 p-1 rounded-2xl border"><button onClick={() => setAdType('regular')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all shadow-sm ${adType === 'regular' ? 'bg-white text-gray-900 border' : 'text-gray-400'}`}>Standard Ad</button><button onClick={() => setAdType('promo')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all shadow-md flex items-center justify-center gap-1.5 ${adType === 'promo' ? 'bg-orange-500 text-white' : 'text-gray-400'}`}><Star size={14} fill="currentColor" /> Promoted Ad</button></div>
              {adType === 'promo' && (<div className="flex gap-2"><button onClick={() => setPromoPlan('7')} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${promoPlan === '7' ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>7 Days<br/><span className="text-lg">₹{sysSettings.pricing.promo7}</span></button><button onClick={() => setPromoPlan('15')} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${promoPlan === '15' ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>15 Days<br/><span className="text-lg">₹{sysSettings.pricing.promo15}</span></button><button onClick={() => setPromoPlan('30')} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${promoPlan === '30' ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>30 Days<br/><span className="text-lg">₹{sysSettings.pricing.promo30}</span></button></div>)}
               <div>
-                <label className="bg-brand/5 h-24 rounded-2xl border-2 border-dashed border-brand/30 flex flex-col items-center justify-center gap-2 text-brand cursor-pointer"><Camera size={24}/><span className="font-bold text-xs">{postImages.length > 0 ? `${postImages.length}/6 Photos Selected` : 'Upload Photos (max 6)'}</span><input type="file" className="hidden" multiple accept="image/*" onChange={addPostPhotos} /></label>
+                <label className="bg-brand/5 h-24 rounded-2xl border-2 border-dashed border-brand/30 flex flex-col items-center justify-center gap-2 text-brand cursor-pointer"><Camera size={24}/><span className="font-bold text-xs">{isCompressingPhotos ? 'Photos optimize ho rahi hain…' : postImages.length > 0 ? `${postImages.length}/6 Photos Selected` : 'Upload Photos (max 6)'}</span><input type="file" className="hidden" multiple accept="image/*" onChange={addPostPhotos} disabled={isCompressingPhotos} /></label>
                 {postImages.length > 0 && (<div className="grid grid-cols-3 gap-2 mt-2">{postImages.map((p, i) => (<div key={i} className="relative"><img src={p.url} className="w-full h-20 rounded-xl object-cover border border-gray-200" alt={`Photo ${i + 1}`} /><button type="button" onClick={() => removePostPhoto(i)} className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs font-black flex items-center justify-center shadow">✕</button><span className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] font-black px-1.5 py-0.5 rounded">{i + 1}</span></div>))}</div>)}
               </div>
               <div className={`flex items-center justify-between p-3 rounded-2xl border-2 transition-colors ${wantBanner ? 'bg-purple-50 border-purple-400' : 'bg-gray-50 border-transparent'}`}><div><p className="text-sm font-black text-gray-800 flex items-center gap-1.5"><Megaphone size={16} className="text-purple-600" /> Top Banner Add-on</p><p className="text-[11px] font-bold text-gray-500">₹{sysSettings.pricing.bannerPrice || '499'} • {sysSettings.pricing.bannerDays || '7'} din top strip par (paid)</p></div><button type="button" onClick={() => setWantBanner(!wantBanner)} className={`w-12 h-7 rounded-full font-black text-[10px] transition-colors ${wantBanner ? 'bg-purple-600 text-white' : 'bg-gray-300 text-gray-500'}`}>{wantBanner ? 'ON' : 'OFF'}</button></div>
