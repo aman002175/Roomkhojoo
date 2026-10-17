@@ -45,6 +45,8 @@ export default function AdminPanel() {
   const [chatTicketId, setChatTicketId] = useState(null);
   const [adminReply, setAdminReply] = useState({});
   const adminChatScrollRef = useRef(null);
+  // 🔗 Purane-ad claim requests (#13 fix)
+  const [claims, setClaims] = useState([]);
 
   useEffect(() => {
     if (adminChatScrollRef.current) adminChatScrollRef.current.scrollTop = adminChatScrollRef.current.scrollHeight;
@@ -72,7 +74,22 @@ export default function AdminPanel() {
       .then(res => res.json())
       .then(data => { if (data.success) { setTickets(data.tickets || []); setOpenCount(data.openCount || 0); } })
       .catch(() => { /* tickets load fail: silent */ });
+    fetch(`${API_URL}/admin/claims`, { headers: adminAuthHeaders() })
+      .then(res => res.json())
+      .then(data => { if (data.success) setClaims(data.rooms || []); })
+      .catch(() => { /* claims load fail: silent */ });
   }, [isAuthenticated, refreshKey]);
+
+  // 🔗 Claim request approve/reject (approve = ad claimant ke account se link)
+  const handleClaim = async (id, action) => {
+    try {
+      const res = await fetch(`${API_URL}/admin/claims/${id}/${action}`, { method: 'POST', headers: adminAuthHeaders() });
+      const data = await res.json();
+      if (!data.success) return alert(data.message || 'Kuch gadbad ho gayi.');
+      setClaims(prev => prev.filter(c => c._id !== id));
+      setRefreshKey(k => k + 1);
+    } catch { alert('Server connection failed.'); }
+  };
 
   const handleLogin = async () => {
     try {
@@ -258,6 +275,27 @@ export default function AdminPanel() {
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mt-4"><div className="p-4 border-b bg-gray-50"><h3 className="font-black text-gray-800 flex items-center gap-2"><Clock size={18}/> Users & Ad Status Report</h3></div><div className="p-0 overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold border-b"><tr><th className="p-3">User/Owner</th><th className="p-3">Ad Title</th><th className="p-3 text-brand">Pay Code</th><th className="p-3">Plan</th><th className="p-3">Status</th><th className="p-3">Action</th></tr></thead><tbody className="divide-y divide-gray-100">{adminRooms.map(room => (<tr key={room._id} className="hover:bg-gray-50"><td className="p-3 font-bold text-gray-800"><div className="flex items-center gap-2"><div className="w-6 h-6 bg-brand/10 text-brand rounded-full flex justify-center items-center text-[10px] shrink-0"><User size={12}/></div>{room.ownerName || 'Owner'}</div></td><td className="p-3 text-gray-600 line-clamp-1 max-w-[150px]">{room.title}</td><td className="p-3 font-black text-brand bg-brand/5 border-x">{room.paymentCode || 'FREE'}</td><td className="p-3">{room.isPromoted ? <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoPlan}D</span> : <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">Regular</span>}</td><td className="p-3">{getDaysLeft(room.expiryDate, room.promoPlan)}</td><td className="p-3"><a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka Ad ("${room.title}") jald hi expire hone wala hai.`)}`} target="_blank" rel="noreferrer" className="bg-[#25D366]/10 text-[#25D366] px-3 py-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform w-fit"><MessageCircle size={14}/> Alert</a></td></tr>))}</tbody></table></div></div>
           </div>
         )}
+
+        {/* Ads Tab — Section 0: Purane-ad claim requests (#13) */}
+        {activeTab === 'ads' && claims.length > 0 && (<div className="space-y-3">
+          <h2 className="text-base font-black text-gray-800 px-1 flex items-center gap-2"><Link size={18} className="text-blue-600" /> Purane Ad Claims ({claims.length})</h2>
+          {claims.map(c => (
+            <div key={c._id} className="bg-white p-4 rounded-2xl shadow-sm border border-blue-200 flex flex-col gap-3">
+              <div className="flex gap-3 items-center">
+                <img src={getImageUrl(c.image)} className="w-16 h-16 rounded-xl object-cover shrink-0 border border-gray-100" alt="Room" />
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-black text-gray-800 truncate">{c.title}</h4>
+                  <p className="text-xs font-bold text-gray-500 mt-0.5 truncate">Ad ka No.: {c.mobile} • Claimant: {c.claimRequestName || 'User'}</p>
+                  <p className="text-[10px] font-black text-blue-700 mt-0.5">Mobile match ✅ — verify karke approve ya reject karein</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => handleClaim(c._id, 'approve')} className="flex-1 bg-green-600 text-white py-2.5 rounded-xl font-black text-sm active:scale-95 flex items-center justify-center gap-1"><Check size={16}/> Approve (Link)</button>
+                <button onClick={() => handleClaim(c._id, 'reject')} className="flex-1 bg-gray-100 text-gray-600 py-2.5 rounded-xl font-black text-sm active:scale-95 flex items-center justify-center gap-1"><X size={16}/> Reject</button>
+              </div>
+            </div>
+          ))}
+        </div>)}
 
         {/* Ads Tab — Section 1: Pending */}
         {activeTab === 'ads' && (<div className="space-y-4 pb-10">

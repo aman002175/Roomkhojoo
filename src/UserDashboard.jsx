@@ -41,6 +41,12 @@ export default function UserDashboard() {
   // 💳 P0 fix: UPI note ka code — server bhi yahi save karega (admin ko wahi dikhega)
   const [renewCode, setRenewCode] = useState('');
   const renewCodeRoomRef = useRef(null); // same room reopen par wahi code reuse
+  // 🔗 Purane ad claim (#13 fix): mobile match + admin approval
+  const [claimOpen, setClaimOpen] = useState(false);
+  const [claimMobile, setClaimMobile] = useState('');
+  const [claimResults, setClaimResults] = useState([]);
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimSearched, setClaimSearched] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sysSettings, setSysSettings] = useState({ facilities: ['Wi-Fi', 'AC', 'Water 24x7', 'Electricity', 'Geyser', 'RO Water', 'Parking', 'CCTV', 'Meals', 'Attached Washroom'] });
 
@@ -78,14 +84,35 @@ export default function UserDashboard() {
 
   const handleLogout = () => { localStorage.removeItem('roomkhojo_user'); localStorage.removeItem('roomkhojo_token'); navigate('/'); window.location.reload(); };
 
-  // 🔗 Apne puraane ads khud link karo — admin ki zaroorat nahi (one-tap)
-  const handleClaimOrphans = async () => {
+  // 🔗 Purane ads claim — mobile match + admin approval (purana one-tap claim-orphans hata diya)
+  const openClaimModal = () => { setClaimOpen(true); setClaimResults([]); setClaimSearched(false); };
+
+  const searchClaimable = async () => {
+    const digits = claimMobile.replace(/\D/g, '').slice(-10);
+    if (digits.length !== 10) return alert('Sahi 10-digit mobile number daliye.');
+    setClaimBusy(true); setClaimSearched(false);
     try {
-      const res = await fetch(`${BASE_URL}/api/users/claim-orphans`, { method: 'POST', headers: authHeaders() });
+      const res = await fetch(`${BASE_URL}/api/rooms/claimable?mobile=${digits}`, { headers: authHeaders() });
       const data = await res.json();
-      alert(data.message);
-      if (data.success && data.migrated > 0) setRefreshKey(k => k + 1);
+      if (data.success) { setClaimResults(data.rooms || []); setClaimSearched(true); }
+      else alert(data.message || 'Search fail ho gaya.');
     } catch { alert('Server connection failed.'); }
+    setClaimBusy(false);
+  };
+
+  const submitClaim = async (roomId) => {
+    setClaimBusy(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/rooms/${roomId}/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ mobile: claimMobile })
+      });
+      const data = await res.json();
+      alert(data.message || (data.success ? 'Request bhej di!' : 'Claim fail ho gaya.'));
+      if (data.success) setClaimResults(prev => prev.map(r => r._id === roomId ? { ...r, claimPending: true, claimByMe: true } : r));
+    } catch { alert('Server connection failed.'); }
+    setClaimBusy(false);
   };
 
   const toggleRoomStatus = async (roomId) => {
@@ -241,7 +268,10 @@ export default function UserDashboard() {
       <div className="flex-1 p-6 overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-black text-gray-800 flex items-center gap-2"><Star className="text-brand"/> My Posted Ads</h2>
-          <span className="bg-brand/10 text-brand px-3 py-1 rounded-full text-xs font-black">{myRooms.length} Total</span>
+          <div className="flex items-center gap-2">
+            <button onClick={openClaimModal} className="bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-full text-[11px] font-black flex items-center gap-1 active:scale-95"><Link size={12} /> Claim Purana Ad</button>
+            <span className="bg-brand/10 text-brand px-3 py-1 rounded-full text-xs font-black">{myRooms.length} Total</span>
+          </div>
         </div>
         
         {!adsLoaded ? (
@@ -257,8 +287,8 @@ export default function UserDashboard() {
             <div className="space-y-4">
               <div className="bg-blue-50 p-5 rounded-3xl border border-blue-200 text-center">
                 <p className="font-black text-blue-900 mb-1 flex items-center justify-center gap-1.5"><Link size={16} /> Purane ads hain?</p>
-                <p className="text-xs font-bold text-blue-700 mb-3">Puraani site wale ads ek tap me link karo (admin ki zaroorat nahi).</p>
-                <button onClick={handleClaimOrphans} className="bg-blue-600 text-white px-5 py-3 rounded-2xl font-black text-sm active:scale-95">Mere Purane Ads Link Karo</button>
+                <p className="text-xs font-bold text-blue-700 mb-3">Mobile number se verify karke claim karein — admin approve karega. Ads live rehte hain.</p>
+                <button onClick={openClaimModal} className="bg-blue-600 text-white px-5 py-3 rounded-2xl font-black text-sm active:scale-95">Purana Ad Claim Karein</button>
               </div>
               <div className="bg-white p-10 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center text-center"><div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4"><Bell size={24} className="text-gray-300"/></div><p className="text-gray-500 font-bold">Abhi aapne koi room ad post nahi kiya hai.</p><button onClick={() => navigate('/')} className="mt-4 text-brand font-black underline">Go post an ad</button></div>
             </div>
@@ -333,6 +363,36 @@ export default function UserDashboard() {
       </div>
 
       {/* Logout ab Settings panel me hai (upar gear button) */}
+
+      {/* 🔗 PURANE AD CLAIM MODAL (mobile match → admin approval) */}
+      {claimOpen && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4">
+          <div className="bg-white w-full max-w-md rounded-t-[30px] sm:rounded-3xl p-6 shadow-2xl relative flex flex-col max-h-[85dvh]">
+            <button onClick={() => setClaimOpen(false)} className="absolute top-4 right-4 bg-gray-100 p-2 rounded-full active:scale-90"><X size={20}/></button>
+            <h2 className="text-xl font-black mb-1 flex items-center gap-2"><Link size={20} className="text-blue-600" /> Purane Ad Claim Karein</h2>
+            <p className="text-xs font-bold text-gray-500 mb-4">Jo mobile number us purane ad par tha wahi daliye. Match hone par request admin ko jayegi — approve hote hi ad aapke account me aa jayega. (Ads live rehte hain, kuch delete nahi hota.)</p>
+            <div className="flex gap-2 mb-3">
+              <input type="tel" inputMode="numeric" value={claimMobile} onChange={(e) => setClaimMobile(e.target.value)} placeholder="10-digit mobile number" className="flex-1 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
+              <button onClick={searchClaimable} disabled={claimBusy} className="bg-blue-600 text-white px-4 py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{claimBusy ? '...' : 'Dhundho'}</button>
+            </div>
+            <div className="overflow-y-auto">
+              {claimSearched && claimResults.length === 0 && (<p className="text-center text-gray-500 font-bold text-sm py-6">Is number se koi purana (unclaimed) ad nahi mila.</p>)}
+              {claimResults.map(r => (
+                <div key={r._id} className="flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-2xl p-3 mb-2">
+                  <img src={getImageUrl(r.image)} alt="" className="w-14 h-14 rounded-xl object-cover shrink-0 border border-gray-100" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-gray-800 text-sm truncate">{r.title}</p>
+                    <p className="text-brand font-black text-xs">{r.price}</p>
+                  </div>
+                  {r.claimByMe ? (<span className="text-[10px] font-black text-green-700 bg-green-50 border border-green-200 px-2 py-1 rounded-lg shrink-0">Request Bheji</span>)
+                    : r.claimPending ? (<span className="text-[10px] font-black text-orange-700 bg-orange-50 border border-orange-200 px-2 py-1 rounded-lg shrink-0">Kisi Aur Ki Request</span>)
+                    : (<button onClick={() => submitClaim(r._id)} disabled={claimBusy} className="bg-green-600 text-white px-3 py-2 rounded-lg font-black text-xs active:scale-95 disabled:opacity-60">Claim</button>)}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 🔄 RENEW MODAL (expired promo → payment → admin verify) */}
       {renewRoom && (
