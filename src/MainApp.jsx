@@ -297,7 +297,6 @@ export default function MainApp() {
             const found = (data.rooms || []).find(r => r._id === rid);
             if (found) {
               setSelectedRoom(found);
-              markRoomViewed(found);
               // reload ke waqt duplicate history entry na bane
               if (!(window.history.state && window.history.state.roomPopup)) window.history.pushState({ roomPopup: true }, '', window.location.href);
               flyWhenReady(found.lng, found.lat, 16);
@@ -485,11 +484,13 @@ export default function MainApp() {
       window.removeEventListener('mouseup', up);
       window.removeEventListener('touchmove', move);
       window.removeEventListener('touchend', up);
+      window.removeEventListener('touchcancel', up); // P2 #46: cancel par bhi cleanup (leak nahi)
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
     window.addEventListener('touchmove', move, { passive: false });
     window.addEventListener('touchend', up);
+    window.addEventListener('touchcancel', up);
   };
 
   const getAdAmount = () => {
@@ -630,7 +631,7 @@ export default function MainApp() {
       const data = await res.json().catch(() => null);
       if(data && data.success) { 
         alert(data.message || 'Ad submitted!'); 
-        setIsPostAdOpen(false); setShowPaymentWindow(false); setPostTitle(''); setPostPrice(''); setPostMobile(''); setSelectedFacilities([]); setPostLng(null); setPostLat(null); clearPostPhotos(); setPayRef(''); setPayCode(''); setWantBanner(false); setPoiSelected([]); 
+        resetPostForm(); // P2 #45: pura reset (pehle landmark/category/plan stale reh jate the)
       } else {
         // ⚠️ P0 fix: fail par SILENT nahi — asli reason dikhao
         alert((data && data.message) || `Ad submit nahi hua (error ${res.status}). Dobara try karein.`);
@@ -652,6 +653,18 @@ export default function MainApp() {
   const cancelSubmit = () => {
     submitCanceledRef.current = true;
     if (submitAbortRef.current) submitAbortRef.current.abort();
+  };
+
+  // P2 #45: submit ke baad PURA form reset — landmark/category/pin/plan kuch bhi stale na rahe
+  const resetPostForm = () => {
+    setIsPostAdOpen(false); setShowPaymentWindow(false); setIsPickingLocation(false);
+    setPostTitle(''); setPostPrice(''); setPostMobile(''); setPostLandmark('');
+    setSelectedFacilities([]); setPoiSelected([]);
+    setPostLng(null); setPostLat(null); setGpsAccuracy(null);
+    setAdType('regular'); setPromoPlan('7'); setWantBanner(false);
+    setPayRef(''); setPayCode('');
+    setPostCategory((sysSettings.categories && sysSettings.categories[0]) || 'PG');
+    clearPostPhotos();
   };
 
   useEffect(() => {
@@ -689,6 +702,13 @@ export default function MainApp() {
       geoWatchIdRef.current = null;
     }
   }, []);
+
+  // 👁 P2 #46: view-count sirf 3s dwell ke baad (turant open-close se count na badhe)
+  useEffect(() => {
+    if (!selectedRoom || !selectedRoom._id) return;
+    const t = setTimeout(() => markRoomViewed(selectedRoom), 3000);
+    return () => clearTimeout(t);
+  }, [selectedRoom]);
 
   // 🔙 P2 #39: phone back button popup band kare (pushState/popstate sync)
   useEffect(() => {
@@ -870,7 +890,6 @@ export default function MainApp() {
   // Popup khulne par link me ?room=id lagao (share/copy ke liye) + back-button history entry (P2 #39)
   const openRoomPopup = (room) => {
     setSelectedRoom(room);
-    markRoomViewed(room);
     if (room && room._id) {
       const p = new URLSearchParams(window.location.search);
       p.set('room', room._id);
@@ -1016,7 +1035,7 @@ export default function MainApp() {
     ctx.fillText(`Landmark: ${room.landmark || 'Hanumangarh'}`, 40, y);
     y += 48;
     ctx.fillStyle = '#111827';
-    ctx.fillText(`${room.ownerName || 'Owner'} • ${room.mobile || ''}`, 40, y);
+    ctx.fillText(`${room.ownerName || 'Owner'}`, 40, y); // P2 #46: mobile card par public NAHI (privacy)
     y += 52;
     if (room.description) {
       ctx.fillStyle = '#4b5563';
@@ -1154,7 +1173,16 @@ export default function MainApp() {
       dot.className = `w-2 h-2 rounded-full border border-white shadow-md ${featured ? 'bg-orange-500' : 'bg-green-600'}`;
       dot.style.marginBottom = '-4px';
       el.appendChild(chip); el.appendChild(dot);
-      const onClick = (e) => { e.stopPropagation(); openRoomPopup(room); if (map.current) map.current.flyTo({ center: [room.lng, room.lat], zoom: 15.5 }); };
+      // P2 #46: touchstart ke BAAD click bhi fire hota hai — dedupe (warna popup 2x khulta)
+      let lastTapAt = 0;
+      const onClick = (e) => {
+        e.stopPropagation();
+        const now = Date.now();
+        if (now - lastTapAt < 400) return;
+        lastTapAt = now;
+        openRoomPopup(room);
+        if (map.current) map.current.flyTo({ center: [room.lng, room.lat], zoom: 15.5 });
+      };
       el.addEventListener('click', onClick); el.addEventListener('touchstart', onClick);
       const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([room.lng, room.lat]).addTo(map.current); markersRef.current.push(marker);
     });
