@@ -3,7 +3,7 @@ import { User, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, S
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (admin token)
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace('/api', '') : 'https://roomkhojo-api.onrender.com';
+const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-api.onrender.com'; // P2 #58: sirf trailing /api strip
 const API_URL = `${BASE_URL}/api/rooms`;
 const ADMIN_API = `${BASE_URL}/api/admin`;
 const SUPPORT_API = `${BASE_URL}/api/support`;
@@ -64,6 +64,13 @@ export default function AdminPanel() {
   const adminChatScrollRef = useRef(null);
   // 🔗 Purane-ad claim requests (#13 fix)
   const [claims, setClaims] = useState([]);
+  // P2 #52: approve/delete/banner in-flight guard (double-tap + disabled)
+  const [actionBusy, setActionBusy] = useState(null);
+  // P2 #56: server-aggregated stats (fallback: client estimate)
+  const [stats, setStats] = useState(null);
+  // P2 #55: migrate dry-run preview + busy guard
+  const [migratePreview, setMigratePreview] = useState(null);
+  const [migrateBusy, setMigrateBusy] = useState(false);
 
   useEffect(() => {
     if (adminChatScrollRef.current) adminChatScrollRef.current.scrollTop = adminChatScrollRef.current.scrollHeight;
@@ -122,7 +129,21 @@ export default function AdminPanel() {
       .then(res => res.json())
       .then(data => { if (data.success) setClaims(data.rooms || []); })
       .catch(() => { /* claims load fail: silent */ });
+    // 📊 #56: server-aggregated stats (fail ho toh client estimate fallback)
+    apiFetch(`${ADMIN_API}/stats`, { headers: adminAuthHeaders() })
+      .then(res => res.json())
+      .then(data => { if (data.success) setStats(data.stats); })
+      .catch(() => { /* stats optional */ });
   }, [isAuthenticated, refreshKey]);
+
+  // 💬 P2 #57: chat khula ho toh 15s auto-refresh (tab hidden par pause, wapas aane par turant)
+  useEffect(() => {
+    if (!chatTicketId) return;
+    const iv = setInterval(() => { if (!document.hidden) setRefreshKey(k => k + 1); }, 15000);
+    const onVis = () => { if (!document.hidden) setRefreshKey(k => k + 1); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, [chatTicketId]);
 
   // 🔗 Claim request approve/reject (approve = ad claimant ke account se link)
   const handleClaim = async (id, action) => {
@@ -181,6 +202,13 @@ export default function AdminPanel() {
 
   // 🚨 SMART ERROR TRACKER (Ise Update Kiya Hai)
   const saveSystemSettings = async (updatedCategories, updatedFacilities, updatedPricing, updatedAdminPath, updatedAutoApprove) => {
+    // 🛡️ P2 #54: har save path par validation (central — kisi bhi caller se invalid data na jaye)
+    const pathToCheck = updatedAdminPath !== undefined ? updatedAdminPath : sysAdminPath;
+    const pathErr = validateAdminPath(pathToCheck);
+    if (pathErr) return alert(pathErr);
+    const pricingToCheck = updatedPricing || sysPricing;
+    const priceErr = validatePricing(pricingToCheck);
+    if (priceErr) return alert(priceErr);
     try {
       const res = await apiFetch(`${ADMIN_API}/settings`, { 
         method: 'POST', 
@@ -205,8 +233,11 @@ export default function AdminPanel() {
   };
 
   const handleAddCategory = () => {
-    if(!newCategoryName.trim()) return;
-    const updated = [...(sysCategories || []), newCategoryName.trim()];
+    const name = newCategoryName.trim();
+    if (!name) return;
+    // P2 #54: duplicate block (case-insensitive)
+    if ((sysCategories || []).some(c => String(c).toLowerCase() === name.toLowerCase())) return alert('Ye category pehle se hai!');
+    const updated = [...(sysCategories || []), name];
     setSysCategories(updated);
     setNewCategoryName('');
   };
@@ -217,8 +248,11 @@ export default function AdminPanel() {
   };
 
   const handleAddFacility = () => {
-    if(!newFacilityName.trim()) return;
-    const updated = [...(sysFacilities || []), newFacilityName.trim()];
+    const name = newFacilityName.trim();
+    if (!name) return;
+    // P2 #54: duplicate block (case-insensitive)
+    if ((sysFacilities || []).some(f => String(f).toLowerCase() === name.toLowerCase())) return alert('Ye facility pehle se hai!');
+    const updated = [...(sysFacilities || []), name];
     setSysFacilities(updated);
     setNewFacilityName('');
   };
@@ -228,29 +262,98 @@ export default function AdminPanel() {
     setSysFacilities(updated);
   };
 
-  const handleApprove = async (id) => { try { await apiFetch(`${API_URL}/${id}/approve`, { method: 'PATCH', headers: adminAuthHeaders() }); setRefreshKey(k => k + 1); } catch { /* approve fail: silent */ } };
-  const handleDelete = async (id) => { if (!window.confirm("Room delete karna hai? Ye action wapas nahi hoga.")) return; try { await apiFetch(`${API_URL}/${id}`, { method: 'DELETE', headers: adminAuthHeaders() }); setRefreshKey(k => k + 1); } catch { /* delete fail: silent */ } };
+  // 🛡️ P2 #54: validation helpers
+  const UPI_RE = /^[a-zA-Z0-9._-]{2,64}@[a-zA-Z]{2,64}$/;
+  const RESERVED_ADMIN_PATHS = ['/', '/dashboard', '/support', '/about', '/terms', '/refund'];
+  const validateAdminPath = (p) => {
+    const v = String(p || '').trim();
+    if (v.length < 4) return 'Path kam se kam 4 characters ka ho.';
+    if (!v.startsWith('/')) return 'Path "/" se shuru hona chahiye.';
+    if (/\s/.test(v)) return 'Path me space nahi ho sakta.';
+    if (RESERVED_ADMIN_PATHS.includes(v.toLowerCase())) return 'Ye app ka apna page hai — alag path chuno.';
+    if (!/^\/[a-zA-Z0-9\-_/]+$/.test(v)) return 'Path me sirf letters, numbers, - aur _ allowed hain.';
+    return null;
+  };
+  const validatePricing = (p) => {
+    const fields = { regular: 'Regular fee', promo7: '7-din promo', promo15: '15-din promo', promo30: '30-din promo', bannerPrice: 'Banner price', bannerDays: 'Banner duration' };
+    for (const [key, label] of Object.entries(fields)) {
+      const val = p[key];
+      if (val === '' || val === undefined || val === null) continue; // optional khaali chhod sakte ho
+      const n = Number(val);
+      if (!Number.isFinite(n) || n < 0) return `${label} ki value sahi positive number nahi hai.`;
+    }
+    return null;
+  };
 
-  // 🎯 Banner approve/revoke (payment verify ke baad)
+  // P2 #52: approve/delete — status check + busy guard + server truth refetch (rollback)
+  const handleApprove = async (id) => {
+    if (actionBusy) return;
+    setActionBusy(id);
+    try {
+      const res = await apiFetch(`${API_URL}/${id}/approve`, { method: 'PATCH', headers: adminAuthHeaders() });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (!res.ok || !data.success) alert(data.message || `Approve fail ho gaya (${res.status}).`);
+    } catch {
+      alert('Server connection failed — approve nahi hua.');
+    }
+    setActionBusy(null);
+    setRefreshKey(k => k + 1); // server truth wapas (fail par bhi state rollback)
+  };
+
+  const handleDelete = async (id) => {
+    if (actionBusy) return;
+    if (!window.confirm("Room delete karna hai? Ye action wapas nahi hoga.")) return;
+    setActionBusy(id);
+    try {
+      const res = await apiFetch(`${API_URL}/${id}`, { method: 'DELETE', headers: adminAuthHeaders() });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (!res.ok || !data.success) alert(data.message || `Delete fail ho gaya (${res.status}).`);
+    } catch {
+      alert('Server connection failed — delete nahi hua.');
+    }
+    setActionBusy(null);
+    setRefreshKey(k => k + 1);
+  };
+
+  // 🎯 Banner approve/revoke (payment verify ke baad) — #52: status check + busy guard
   const handleBannerApprove = async (id, approve) => {
+    if (actionBusy) return;
+    setActionBusy(id);
     try {
       const res = await apiFetch(`${API_URL}/${id}/banner`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ approve }) });
-      const data = await res.json();
-      alert(data.message);
-      if (data.success) setRefreshKey(k => k + 1);
+      const data = await res.json().catch(() => ({ success: false }));
+      if (!res.ok || !data.success) alert(data.message || `Banner update fail (${res.status}).`);
+      else alert(data.message);
     } catch { alert('Server connection failed.'); }
+    setActionBusy(null);
+    setRefreshKey(k => k + 1);
   };
 
   // Purane (Render-time) ads ko email wale account se link karo (one-time)
-  const handleMigrateRooms = async () => {
+  // P2 #55: pehla click = preview (dry-run), doosra click = confirm migrate
+  const handleMigrateRooms = async (confirmRun) => {
+    if (migrateBusy) return; // double-click guard
     if (!migrateEmail.trim()) return alert('Email daliye!');
-    if (!window.confirm('Is email ke user ko saare puraane (bina-link) ads transfer kar dun?')) return;
+    setMigrateBusy(true);
     try {
-      const res = await apiFetch(`${ADMIN_API}/migrate-rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ email: migrateEmail.trim() }) });
+      const res = await apiFetch(`${ADMIN_API}/migrate-rooms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() },
+        body: JSON.stringify({ email: migrateEmail.trim(), dryRun: !confirmRun })
+      });
       const data = await res.json();
-      alert(data.message);
-      if (data.success) { setMigrateEmail(''); setRefreshKey(k => k + 1); }
+      if (!data.success) {
+        alert(data.message);
+        setMigratePreview(null);
+      } else if (data.dryRun) {
+        setMigratePreview(data);
+      } else {
+        alert(data.message);
+        setMigrateEmail(''); setMigratePreview(null);
+        setRefreshKey(k => k + 1);
+      }
     } catch { alert('Server connection failed.'); }
+    setMigrateBusy(false);
   };
 
   const getDaysLeft = (expiryDate, plan) => {
@@ -281,8 +384,10 @@ export default function AdminPanel() {
   const pendingAds = adminRooms.filter(r => !r.isApproved);
   const liveAds = adminRooms.filter(r => r.isApproved);
   const promotedCount = adminRooms.filter(r => r.isPromoted).length;
+  // #56: server stats fail ho toh client estimate (fallback)
   const estRevenue = ((adminRooms.length - promotedCount) * Number(sysPricing.regular || 0)) + (promotedCount * Number(sysPricing.promo7 || 299));
   const uniqueUsersCount = new Set(adminRooms.filter(r => r.userId && r.userId !== 'unknown_user').map(r => r.userId)).size;
+  const revenueTotal = stats ? stats.totalRevenue : estRevenue;
 
   return (
     <div className="h-[100dvh] w-full bg-gray-100 flex flex-col font-sans relative overflow-hidden">
@@ -298,7 +403,8 @@ export default function AdminPanel() {
         </div>
         <div className="flex gap-2">
           <button onClick={() => setRefreshKey(k => k + 1)} className="bg-white/10 p-2 rounded-lg active:scale-95 transition-transform" title="Refresh Data"><BarChart3 size={16} /></button>
-          <button onClick={() => { sessionStorage.removeItem('roomkhojo_admin_token'); setIsAuthenticated(false); }} className="bg-red-500/20 text-red-100 p-2 rounded-lg text-sm font-bold flex items-center gap-2 active:scale-95 transition-transform"><LogOut size={16} className="shrink-0"/> Exit</button>
+          {/* P2 #59: Exit par saari admin state reset — next login par stale data flash na ho */}
+          <button onClick={() => { sessionStorage.removeItem('roomkhojo_admin_token'); setIsAuthenticated(false); setAdminRooms([]); setTickets([]); setClaims([]); setOpenCount(0); setStats(null); setChatTicketId(null); setAdminReply({}); setActiveTab('analytics'); setMigratePreview(null); setMigrateEmail(''); setOldPass(''); setNewAdminUser(''); setNewAdminPass(''); }} className="bg-red-500/20 text-red-100 p-2 rounded-lg text-sm font-bold flex items-center gap-2 active:scale-95 transition-transform"><LogOut size={16} className="shrink-0"/> Exit</button>
         </div>
       </header>
       
@@ -315,7 +421,18 @@ export default function AdminPanel() {
         {/* Analytics Tab */}
         {activeTab === 'analytics' && (
           <div className="space-y-4 pb-10">
-            <div className="grid grid-cols-2 gap-3"><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Registered Users</p><p className="text-2xl font-black text-gray-800">{uniqueUsersCount}</p></div><div className="bg-green-50 p-4 rounded-2xl shadow-sm border border-green-100"><p className="text-xs font-bold text-green-700 uppercase">Est. Revenue</p><p className="text-2xl font-black text-green-800">₹{estRevenue}</p></div><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Ads</p><p className="text-2xl font-black text-gray-800">{adminRooms.length}</p></div><div className="bg-orange-50 p-4 rounded-2xl shadow-sm border border-orange-100"><p className="text-xs font-bold text-orange-700 uppercase">Promo Ads</p><p className="text-2xl font-black text-orange-800">{promotedCount}</p></div></div>
+            <div className="grid grid-cols-2 gap-3"><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Registered Users</p><p className="text-2xl font-black text-gray-800">{stats ? stats.uniqueUsers : uniqueUsersCount}</p></div><div className="bg-green-50 p-4 rounded-2xl shadow-sm border border-green-100"><p className="text-xs font-bold text-green-700 uppercase">{stats ? 'Revenue (Recorded)' : 'Est. Revenue'}</p><p className="text-2xl font-black text-green-800">₹{revenueTotal}</p>{stats ? (<p className="text-[10px] font-bold text-green-600 mt-1">Promo ₹{stats.promoRevenue} • Banner ₹{stats.bannerRevenue}</p>) : (<p className="text-[10px] font-bold text-green-600 mt-1">Approx — server stats load nahi hue</p>)}</div><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Ads</p><p className="text-2xl font-black text-gray-800">{stats ? stats.totalAds : adminRooms.length}</p><p className="text-[10px] font-bold text-gray-400 mt-1">{stats ? `${stats.liveAds} live • ${stats.pendingAds} pending` : ''}</p></div><div className="bg-orange-50 p-4 rounded-2xl shadow-sm border border-orange-100"><p className="text-xs font-bold text-orange-700 uppercase">Promo Ads</p><p className="text-2xl font-black text-orange-800">{stats ? stats.promoAds : promotedCount}</p>{stats ? (<p className="text-[10px] font-bold text-orange-600 mt-1">Banner LIVE: {stats.bannerActive}</p>) : null}</div></div>
+            {stats && (
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                <p className="text-xs font-bold text-gray-500 uppercase mb-2">Revenue Breakdown (recorded)</p>
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  {[['Regular', 'regular'], ['Promo 7D', 'promo7'], ['Promo 15D', 'promo15'], ['Promo 30D', 'promo30']].map(([label, key]) => (
+                    <div key={key} className="bg-gray-50 rounded-xl p-2 border border-gray-100"><p className="text-[10px] font-black text-gray-500 uppercase">{label}</p><p className="text-sm font-black text-gray-800">₹{stats.byPlan[key] || 0}</p></div>
+                  ))}
+                </div>
+                <p className="text-[10px] font-bold text-gray-400 mt-2">Note: sirf un ads ka record jinka payment is fix ke baad approve hua.</p>
+              </div>
+            )}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mt-4"><div className="p-4 border-b bg-gray-50"><h3 className="font-black text-gray-800 flex items-center gap-2"><Clock size={18}/> Users & Ad Status Report</h3></div><div className="p-0 overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold border-b"><tr><th className="p-3">User/Owner</th><th className="p-3">Ad Title</th><th className="p-3 text-brand">Pay Code</th><th className="p-3">Plan</th><th className="p-3">Status</th><th className="p-3">Action</th></tr></thead><tbody className="divide-y divide-gray-100">{adminRooms.map(room => (<tr key={room._id} className="hover:bg-gray-50"><td className="p-3 font-bold text-gray-800"><div className="flex items-center gap-2"><div className="w-6 h-6 bg-brand/10 text-brand rounded-full flex justify-center items-center text-[10px] shrink-0"><User size={12}/></div>{room.ownerName || 'Owner'}</div></td><td className="p-3 text-gray-600 line-clamp-1 max-w-[150px]">{room.title}</td><td className="p-3 font-black text-brand bg-brand/5 border-x">{room.paymentCode || 'FREE'}</td><td className="p-3">{room.isPromoted ? <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoPlan}D</span> : <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">Regular</span>}</td><td className="p-3">{getDaysLeft(room.expiryDate, room.promoPlan)}</td><td className="p-3"><a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka Ad ("${room.title}") jald hi expire hone wala hai.`)}`} target="_blank" rel="noreferrer" className="bg-[#25D366]/10 text-[#25D366] px-3 py-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform w-fit"><MessageCircle size={14}/> Alert</a></td></tr>))}</tbody></table></div></div>
           </div>
         )}
@@ -371,18 +488,18 @@ export default function AdminPanel() {
                 {room.bannerRequested && !room.isBannerActive && (
                   <div className="bg-purple-50 border border-purple-200 p-3 rounded-xl flex justify-between items-center">
                     <p className="text-xs font-bold text-purple-800 flex items-center gap-1"><Megaphone size={13} className="shrink-0" /> Banner Req{room.bannerRef ? (<span className="font-black"> • Ref: {room.bannerRef}</span>) : null}</p>
-                    <button onClick={() => handleBannerApprove(room._id, true)} className="bg-purple-600 text-white px-3 py-2 rounded-lg text-[11px] font-black active:scale-95 shrink-0 ml-2">Approve Banner</button>
+                    <button onClick={() => handleBannerApprove(room._id, true)} disabled={!!actionBusy} className="bg-purple-600 text-white px-3 py-2 rounded-lg text-[11px] font-black active:scale-95 shrink-0 ml-2 disabled:opacity-60">Approve Banner</button>
                   </div>
                 )}
                 {room.isBannerActive && (
                   <div className="bg-purple-50 border border-purple-200 p-3 rounded-xl flex justify-between items-center">
                     <p className="text-xs font-bold text-purple-800 flex items-center gap-1"><Megaphone size={13} className="shrink-0" /> Banner LIVE</p>
-                    <button onClick={() => handleBannerApprove(room._id, false)} className="bg-gray-200 text-gray-600 px-3 py-2 rounded-lg text-[11px] font-black active:scale-95 shrink-0 ml-2">Remove</button>
+                    <button onClick={() => handleBannerApprove(room._id, false)} disabled={!!actionBusy} className="bg-gray-200 text-gray-600 px-3 py-2 rounded-lg text-[11px] font-black active:scale-95 shrink-0 ml-2 disabled:opacity-60">Remove</button>
                   </div>
                 )}
                 <div className="flex gap-2 mt-1">
-                  <button onClick={() => handleApprove(room._id)} className="flex-1 bg-green-500 text-white py-3 rounded-xl text-sm font-black flex items-center justify-center gap-1.5 active:scale-95 transition-transform shadow-lg shadow-green-500/20"><Check size={18} strokeWidth={3}/> Verify Payment & Approve</button>
-                  <button onClick={() => handleDelete(room._id)} className="w-14 bg-red-50 text-red-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-red-100"><X size={20} strokeWidth={3}/></button>
+                  <button onClick={() => handleApprove(room._id)} disabled={!!actionBusy} className="flex-1 bg-green-500 text-white py-3 rounded-xl text-sm font-black flex items-center justify-center gap-1.5 active:scale-95 transition-transform shadow-lg shadow-green-500/20 disabled:opacity-60">{actionBusy === room._id ? 'Process ho raha hai…' : (<><Check size={18} strokeWidth={3}/> Verify Payment & Approve</>)}</button>
+                  <button onClick={() => handleDelete(room._id)} disabled={!!actionBusy} className="w-14 bg-red-50 text-red-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-red-100 disabled:opacity-60"><X size={20} strokeWidth={3}/></button>
                 </div>
               </div>
             ))
@@ -424,11 +541,24 @@ export default function AdminPanel() {
                     <a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka room "${room.title}" kuch users ne "Unavailable" report kiya hai.\nKya aapka room rent par ja chuka hai? Kripya confirm karein taaki hum status update kar sakein.`)}`} target="_blank" rel="noreferrer" className="w-full bg-[#25D366]/10 text-[#25D366] py-2 rounded-lg text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95 transition-transform"><MessageCircle size={14}/> Ask Owner for Confirmation</a>
                   </div>
                 )}
+                {/* #53: banner controls ab Live ads me bhi (approve ke baad bhi manage ho sake) */}
+                {room.bannerRequested && !room.isBannerActive && (
+                  <div className="bg-purple-50 border border-purple-200 p-3 rounded-xl flex justify-between items-center">
+                    <p className="text-xs font-bold text-purple-800 flex items-center gap-1"><Megaphone size={13} className="shrink-0" /> Banner Request{room.bannerRef ? (<span className="font-black"> • Ref: {room.bannerRef}</span>) : null}</p>
+                    <button onClick={() => handleBannerApprove(room._id, true)} disabled={!!actionBusy} className="bg-purple-600 text-white px-3 py-2 rounded-lg text-[11px] font-black active:scale-95 shrink-0 ml-2 disabled:opacity-60">Approve Banner</button>
+                  </div>
+                )}
+                {room.isBannerActive && (
+                  <div className="bg-purple-50 border border-purple-200 p-3 rounded-xl flex justify-between items-center">
+                    <p className="text-xs font-bold text-purple-800 flex items-center gap-1"><Megaphone size={13} className="shrink-0" /> Banner LIVE {room.bannerExpires ? <span className="text-purple-500 font-bold ml-1">({new Date(room.bannerExpires).toLocaleDateString('en-IN')} tak)</span> : null}</p>
+                    <button onClick={() => handleBannerApprove(room._id, false)} disabled={!!actionBusy} className="bg-gray-200 text-gray-600 px-3 py-2 rounded-lg text-[11px] font-black active:scale-95 shrink-0 ml-2 disabled:opacity-60">Remove</button>
+                  </div>
+                )}
                 <div className="flex gap-2 items-center">
                   <div className="flex-1 bg-gray-50 border border-gray-100 p-2 rounded-xl flex items-center justify-center text-xs font-bold text-gray-600">
                     Plan Status: <span className="ml-1.5">{getDaysLeft(room.expiryDate, room.promoPlan)}</span>
                   </div>
-                  <button onClick={() => handleDelete(room._id)} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform border border-red-100"><X size={14} strokeWidth={3}/> Delete Ad</button>
+                  <button onClick={() => handleDelete(room._id)} disabled={!!actionBusy} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform border border-red-100 disabled:opacity-60"><X size={14} strokeWidth={3}/> Delete Ad</button>
                 </div>
               </div>
             )})
@@ -445,6 +575,7 @@ export default function AdminPanel() {
               <p className="font-black text-gray-800 leading-tight truncate">{chatTicket.category}</p>
               <p className="text-[11px] font-bold text-gray-400 truncate">{chatTicket.userName || chatTicket.userEmail || 'User'} • {chatTicket.status}</p>
             </div>
+            <button onClick={() => setRefreshKey(k => k + 1)} className="text-[11px] font-black bg-gray-100 text-gray-600 px-3 py-2 rounded-xl active:scale-95 shrink-0">Refresh</button>
             {chatTicket.status !== 'closed'
               ? <button onClick={() => setTicketStatus(chatTicket._id, 'closed')} className="text-[11px] font-black bg-gray-100 text-gray-600 px-3 py-2 rounded-xl active:scale-95 shrink-0">Close</button>
               : <button onClick={() => setTicketStatus(chatTicket._id, 'open')} className="text-[11px] font-black bg-orange-50 text-orange-700 px-3 py-2 rounded-xl active:scale-95 shrink-0">Reopen</button>}
@@ -462,10 +593,14 @@ export default function AdminPanel() {
               </div>
             ))}
           </div>
-          <div className="p-3 bg-white border-t flex gap-2 shrink-0">
-            <input type="text" value={adminReply[chatTicket._id] || ''} onChange={(e) => setAdminReply(prev => ({ ...prev, [chatTicket._id]: e.target.value }))} placeholder="Jawab likho…" className="flex-1 p-3 bg-gray-50 rounded-2xl outline-none font-bold text-sm border" />
-            <button onClick={() => sendAdminReply(chatTicket._id)} className="bg-brand text-white w-12 rounded-2xl flex items-center justify-center active:scale-95"><Send size={18} /></button>
-          </div>
+          {chatTicket.status !== 'closed' ? (
+            <div className="p-3 bg-white border-t flex gap-2 shrink-0">
+              <input type="text" value={adminReply[chatTicket._id] || ''} onChange={(e) => setAdminReply(prev => ({ ...prev, [chatTicket._id]: e.target.value }))} placeholder="Jawab likho…" className="flex-1 p-3 bg-gray-50 rounded-2xl outline-none font-bold text-sm border" />
+              <button onClick={() => sendAdminReply(chatTicket._id)} className="bg-brand text-white w-12 rounded-2xl flex items-center justify-center active:scale-95"><Send size={18} /></button>
+            </div>
+          ) : (
+            <p className="p-4 text-center text-xs font-bold text-gray-400 bg-white border-t">Ticket band hai — reply ke liye pehle Reopen dabao.</p>
+          )}
         </div>
       )}
 
@@ -497,14 +632,26 @@ export default function AdminPanel() {
         {/* System Tab */}
         {activeTab === 'system' && (
            <div className="space-y-4 pb-10">
-              {/* Purane Ads Migrate (one-time) */}
+              {/* Purane Ads Migrate (one-time) — #55: preview (dry-run) → confirm */}
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-blue-200">
                 <h3 className="font-black text-gray-800 mb-1 flex items-center gap-1.5"><Link size={16} className="text-blue-600" /> Purane Ads Link Karo</h3>
-                <p className="text-[11px] font-bold text-gray-500 mb-3">Render wale time ke ads (puraani login IDs wale) ko kisi email wale account se jod do. Sirf bina-link ads move honge, linked ads safe rahenge.</p>
+                <p className="text-[11px] font-bold text-gray-500 mb-3">Render wale time ke ads (puraani login IDs wale) ko kisi email wale account se jod do. Sirf bina-link ads move honge, linked ads safe rahenge. Pehle Preview dikhega — tabhi confirm hoga.</p>
                 <div className="flex gap-2">
-                  <input type="email" value={migrateEmail} onChange={(e) => setMigrateEmail(e.target.value)} placeholder="user@email.com" className="flex-1 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
-                  <button onClick={handleMigrateRooms} className="bg-blue-600 text-white px-4 rounded-xl font-black text-sm active:scale-95">Migrate</button>
+                  <input type="email" value={migrateEmail} onChange={(e) => { setMigrateEmail(e.target.value); setMigratePreview(null); }} placeholder="user@email.com" className="flex-1 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
+                  <button onClick={() => handleMigrateRooms(false)} disabled={migrateBusy} className="bg-blue-600 text-white px-4 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{migrateBusy ? '…' : 'Preview'}</button>
                 </div>
+                {migratePreview && (
+                  <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                    <p className="text-xs font-black text-blue-800">{migratePreview.count} ads move honge {migrateEmail.trim()} ko:</p>
+                    {(migratePreview.sample || []).length > 0 && (
+                      <ul className="text-[11px] font-bold text-blue-700 mt-1 space-y-0.5">
+                        {(migratePreview.sample || []).map((s, i) => (<li key={i}>• {s.title} <span className="text-blue-400">({s.mobile})</span></li>))}
+                        {migratePreview.count > (migratePreview.sample || []).length && <li className="text-blue-400">…aur {migratePreview.count - migratePreview.sample.length} more</li>}
+                      </ul>
+                    )}
+                    <button onClick={() => handleMigrateRooms(true)} disabled={migrateBusy} className="mt-3 w-full bg-blue-600 text-white py-2.5 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{migrateBusy ? 'Migrate ho raha hai…' : `Confirm — ${migratePreview.count} Ads Migrate Karo`}</button>
+                  </div>
+                )}
               </div>
 
               {/* Auto-approve FREE ads toggle */}
@@ -518,8 +665,8 @@ export default function AdminPanel() {
              <div className="bg-white p-5 rounded-2xl shadow-sm border border-brand/20">
                <h3 className="font-black text-brand mb-2 flex items-center gap-2"><Smartphone size={18}/> Admin UPI Details</h3>
                <p className="text-xs text-gray-500 mb-4 font-bold">Payments receive karne ke liye apni asli UPI ID daalein.</p>
-               <input type="text" value={sysPricing.upiId || ''} onChange={e=>setSysPricing({...sysPricing, upiId: e.target.value})} placeholder="e.g. 9145891108@ybl" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border focus:border-brand mb-3" />
-               <button onClick={() => { if(window.confirm("Kya aap sach mein UPI ID update karna chahte hain? Sabhi payments ab is naye UPI par aayengi.")) { saveSystemSettings(sysCategories, sysFacilities, sysPricing); } }} className="bg-brand text-white font-black py-3 px-4 rounded-xl text-sm w-full active:scale-95 transition-transform">Save UPI ID</button>
+                <input type="text" value={sysPricing.upiId || ''} onChange={e=>setSysPricing({...sysPricing, upiId: e.target.value})} placeholder="e.g. 9145891108@ybl" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border focus:border-brand mb-3" />
+                <button onClick={() => { const upi = String(sysPricing.upiId || '').trim(); if (!UPI_RE.test(upi)) return alert('Sahi UPI ID daliye (jaise: 9145891108@ybl).'); if(window.confirm("Kya aap sach mein UPI ID update karna chahte hain? Sabhi payments ab is naye UPI par aayengi.")) { saveSystemSettings(sysCategories, sysFacilities, { ...sysPricing, upiId: upi }); } }} className="bg-brand text-white font-black py-3 px-4 rounded-xl text-sm w-full active:scale-95 transition-transform">Save UPI ID</button>
              </div>
 
              {/* Security Card */}
@@ -539,7 +686,7 @@ export default function AdminPanel() {
                 <h3 className="font-black text-purple-700 mb-2 flex items-center gap-1.5"><Link size={16} /> Admin Panel Path</h3>
                 <p className="text-xs text-gray-500 mb-4 font-bold">Ye path backend se aata hai. Save ke baad page refresh karo — tab naya path chalega, puraana band.</p>
                 <input type="text" value={sysAdminPath} onChange={e=>setSysAdminPath(e.target.value)} placeholder="/mera-secret-path" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border focus:border-purple-300 mb-3" />
-                <button onClick={() => { if(window.confirm("Admin panel ka path badal jayega. Puraana path kaam nahi karega. Continue?")) { saveSystemSettings(sysCategories, sysFacilities, sysPricing, sysAdminPath); } }} className="bg-purple-600 text-white font-black py-3 px-4 rounded-xl text-sm w-full active:scale-95 transition-transform">Save Path</button>
+                <button onClick={() => { const err = validateAdminPath(sysAdminPath); if (err) return alert(err); if(window.confirm("Admin panel ka path badal jayega. Puraana path kaam nahi karega. Continue?")) { saveSystemSettings(sysCategories, sysFacilities, sysPricing, sysAdminPath.trim()); } }} className="bg-purple-600 text-white font-black py-3 px-4 rounded-xl text-sm w-full active:scale-95 transition-transform">Save Path</button>
               </div>
 
              {/* Categories Card */}

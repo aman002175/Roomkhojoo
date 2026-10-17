@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, Send } from 'lucide-react';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-api.onrender.com').replace('/api', '');
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-api.onrender.com').replace(/\/api\/?$/, ''); // P2 #58: sirf trailing /api strip
 const CATEGORIES = ['Payment Issue', 'Ad Approval', 'Account & Login', 'Report Fake Ad', 'Other'];
 
 const authHeaders = () => {

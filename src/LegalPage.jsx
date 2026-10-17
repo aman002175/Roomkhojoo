@@ -4,6 +4,8 @@ import { ArrowLeft, Info, FileText, Shield, ExternalLink, Heart } from 'lucide-r
 // =============================================
 // PAGE DATA
 // =============================================
+// P2 #60: legal content aakhri baar kab revise hua (hardcoded stale "May 2025" hata diya)
+const LAST_UPDATED = 'October 2026';
 const pages = {
   about: {
     title: 'About Us',
@@ -81,6 +83,12 @@ export default function LegalPage({ type }) {
 
   if (!page) return null;
 
+  // P2 #60: direct URL se aaye ho toh navigate(-1) site se bahar le jata tha — fallback home
+  const goBack = () => {
+    if (window.history.length > 1) navigate(-1);
+    else navigate('/');
+  };
+
   return (
     <div className="h-[100dvh] w-full bg-gray-50 flex flex-col font-sans overflow-y-auto">
 
@@ -91,7 +99,7 @@ export default function LegalPage({ type }) {
         <div className="absolute -bottom-6 -left-6 w-28 h-28 bg-white/10 rounded-full" />
 
         <button
-          onClick={() => navigate(-1)}
+          onClick={goBack}
           className="relative z-10 mb-6 flex items-center gap-2 text-white/80 font-bold text-sm active:scale-95 transition-transform"
         >
           <ArrowLeft size={20} /> Back
@@ -104,7 +112,7 @@ export default function LegalPage({ type }) {
           {page.title}
         </h1>
         <p className="relative z-10 text-white/70 font-bold text-sm mt-1">
-          RoomKhojo • Last updated: May 2025
+          RoomKhojo • Last updated: {LAST_UPDATED}
         </p>
       </div>
 
@@ -135,7 +143,7 @@ export default function LegalPage({ type }) {
             Built with <Heart size={13} fill="currentColor" className="inline text-brand" /> by Aman Bishnoi
             <ExternalLink size={13} className="opacity-60" />
           </a>
-          <p className="text-gray-300 text-xs font-bold mt-1">© 2025 29 Dev's. All rights reserved.</p>
+          <p className="text-gray-300 text-xs font-bold mt-1">© {new Date().getFullYear()} 29 Dev's. All rights reserved.</p>
         </div>
       </footer>
 

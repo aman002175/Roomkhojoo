@@ -4,7 +4,7 @@ import { User, LogOut, Star, ArrowLeft, Settings, Bell, MapPin, Trash2, Edit3, X
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace('/api', '') : 'https://roomkhojo-api.onrender.com';
+const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-api.onrender.com'; // P2 #58: sirf trailing /api strip
 const getImageUrl = (path) => !path ? 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=400&q=80' : path.startsWith('http') ? path : `${BASE_URL}${path}`;
 
 // Logged-in API calls ke liye Bearer header
