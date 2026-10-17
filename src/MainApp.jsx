@@ -1152,12 +1152,22 @@ export default function MainApp() {
   };
 
   // P2 #41: confirm + loading guard + 429 ka saaf message + "Reported" state
+  // P1-2 fix: report ke liye login zaroori (server bhi 401 dega, par modal yahin khol dete hain)
   const handleReportUnavailable = async (roomId) => {
     if (!roomId || reportedIds.includes(roomId) || reportBusyRef.current.has(roomId)) return;
-    if (!window.confirm('Ye ad available nahi hai? Admin verify karke hata dega.')) return;
+    if (!isLoggedIn) {
+      alert('Report karne ke liye pehle login karo.');
+      setAuthMode('login');
+      return;
+    }
+    if (!window.confirm('Ye ad available nahi hai? 5 alag users ke report par ad auto-hide ho jata hai.')) return;
     reportBusyRef.current.add(roomId);
     try {
-      const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}/report-unavailable`, { method: 'PUT' });
+      const token = localStorage.getItem('roomkhojo_token');
+      const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}/report-unavailable`, {
+        method: 'PUT',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       const data = await res.json().catch(() => null);
       if (res.ok) {
         setReportedIds(prev => {
