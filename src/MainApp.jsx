@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as maplibregl from 'maplibre-gl'; // v6 ESM-only: namespace import (default import hata)
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { X, Phone, MessageCircle, Map as MapIcon, List, Plus, Camera, Target, Info, FileText, Shield, ChevronRight, Menu, User, MapPin, Lock, Search, Navigation, AlertTriangle, Heart, Share2, Megaphone, Landmark, TrainFront, Bus, Hospital, Stethoscope, GraduationCap, School, BookOpen, Star, Satellite, Ruler, Send, Copy, Home, Users, Building2, Briefcase, Hotel, Check, Tag, Image as ImageIcon, LifeBuoy } from 'lucide-react';
+import { X, Phone, MessageCircle, Map as MapIcon, List, Plus, Camera, Target, Info, FileText, Shield, ChevronRight, Menu, User, MapPin, Lock, Search, Navigation, Loader2, AlertTriangle, Heart, Share2, Megaphone, Landmark, TrainFront, Bus, Hospital, Stethoscope, GraduationCap, School, BookOpen, Star, Satellite, Ruler, Send, Copy, Home, Users, Building2, Briefcase, Hotel, Check, Tag, Image as ImageIcon, LifeBuoy } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import { markerIcon, ICON_STAR } from './markerIcons';
 
@@ -204,6 +204,7 @@ export default function MainApp() {
   const [isPickingLocation, setIsPickingLocation] = useState(false);
   const [showLocationWarning, setShowLocationWarning] = useState(false);
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
+  const [isLocating, setIsLocating] = useState(false);
   const [adType, setAdType] = useState('regular'); 
   const [promoPlan, setPromoPlan] = useState('7'); 
   
@@ -426,10 +427,12 @@ export default function MainApp() {
 
   const handleLiveLocation = (sharp = false) => {
     if (navigator.geolocation) {
+      setIsLocating(true);
       navigator.geolocation.getCurrentPosition((pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
         const acc = Math.round(accuracy || 0);
         setGpsAccuracy(acc);
+        setIsLocating(false);
         const zoom = sharp ? (acc <= 30 ? 18 : acc <= 100 ? 17 : acc <= 300 ? 16 : 15) : (acc <= 100 ? 16.5 : 15.5);
         if(map.current) map.current.flyTo({ center: [longitude, latitude], zoom });
         setPostLng(longitude); setPostLat(latitude);
@@ -437,6 +440,7 @@ export default function MainApp() {
         const el = document.createElement('div'); el.className = 'w-5 h-5 bg-blue-500 border-[3px] border-white rounded-full shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-pulse';
         userLocMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([longitude, latitude]).addTo(map.current);
       }, () => {
+        setIsLocating(false);
         alert("Location permission denied ya accuracy issue hai. Kripya map par drag karke location pin karein.");
       }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
     }
@@ -949,9 +953,9 @@ export default function MainApp() {
           );
         })()}
         <div className={`absolute inset-0 transition-opacity duration-500 ${view === 'map' ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}><div ref={mapContainer} className="w-full h-full" /></div>
-        {view === 'map' && !isPickingLocation && (<button onClick={() => handleLiveLocation(false)} className="absolute bottom-28 right-4 z-40 bg-white p-3 rounded-full shadow-xl border border-gray-100 text-brand active:scale-90 transition-transform"><Navigation size={24} fill="currentColor"/></button>)}
+        {view === 'map' && !isPickingLocation && (<button onClick={() => handleLiveLocation(false)} disabled={isLocating} className="absolute bottom-28 right-4 z-40 bg-white p-3 rounded-full shadow-xl border border-gray-100 text-brand active:scale-90 transition-transform disabled:opacity-60 disabled:cursor-wait">{isLocating ? <Loader2 size={24} className="animate-spin" /> : <Navigation size={24} fill="currentColor"/>}</button>)}
         {view === 'map' && (<button onClick={() => switchMapStyle(mapStyle === 'street' ? 'sat' : 'street')} className="absolute left-4 bottom-28 z-40 bg-white px-3 py-2 rounded-full shadow-xl border border-gray-100 text-xs font-black text-gray-700 flex items-center gap-1.5 active:scale-90 transition-transform">{mapStyle === 'street' ? (<><Satellite size={14} /> Satellite</>) : (<><MapIcon size={14} /> Street</>)}</button>)}
-        {view === 'map' && isPickingLocation && (<button onClick={() => handleLiveLocation(true)} className="absolute bottom-[90px] right-4 z-40 bg-white px-4 py-2.5 rounded-full shadow-xl border border-gray-100 text-brand font-black text-xs flex items-center gap-2 active:scale-90 transition-transform"><Navigation size={16} fill="currentColor"/> My Location</button>)}
+        {view === 'map' && isPickingLocation && (<button onClick={() => handleLiveLocation(true)} disabled={isLocating} className="absolute bottom-[90px] right-4 z-40 bg-white px-4 py-2.5 rounded-full shadow-xl border border-gray-100 text-brand font-black text-xs flex items-center gap-2 active:scale-90 transition-transform disabled:opacity-70 disabled:cursor-wait">{isLocating ? (<><Loader2 size={16} className="animate-spin" /> Finding Your Location…</>) : (<><Navigation size={16} fill="currentColor"/> My Location</>)}</button>)}
         {isPickingLocation && view === 'map' && (
           <div className="absolute inset-0 z-30 pointer-events-none">
             <div className="absolute top-1/2 left-1/2 pointer-events-none drop-shadow-xl" style={{ transform: 'translate(-50%, -100%)' }}>
@@ -961,7 +965,7 @@ export default function MainApp() {
               </svg>
             </div>
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 mt-2 bg-white px-4 py-1 rounded-full shadow-md text-xs font-bold text-gray-700">
-              {gpsAccuracy ? `GPS ±${gpsAccuracy}m — drag karke adjust karein` : 'Drag map to pin'}
+              {isLocating ? 'Finding Your Current Location…' : gpsAccuracy ? `GPS ±${gpsAccuracy}m — drag karke adjust karein` : 'Drag map to pin'}
             </div>
           </div>
         )}
