@@ -646,7 +646,7 @@ export default function AdminPanel() {
                     {(migratePreview.sample || []).length > 0 && (
                       <ul className="text-[11px] font-bold text-blue-700 mt-1 space-y-0.5">
                         {(migratePreview.sample || []).map((s, i) => (<li key={i}>• {s.title} <span className="text-blue-400">({s.mobile})</span></li>))}
-                        {migratePreview.count > (migratePreview.sample || []).length && <li className="text-blue-400">…aur {migratePreview.count - migratePreview.sample.length} more</li>}
+                        {migratePreview.count > (migratePreview.sample || []).length && <li className="text-blue-400">…aur {migratePreview.count - (migratePreview.sample || []).length} more</li>}
                       </ul>
                     )}
                     <button onClick={() => handleMigrateRooms(true)} disabled={migrateBusy} className="mt-3 w-full bg-blue-600 text-white py-2.5 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{migrateBusy ? 'Migrate ho raha hai…' : `Confirm — ${migratePreview.count} Ads Migrate Karo`}</button>
