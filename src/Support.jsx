@@ -20,12 +20,32 @@ export default function Support() {
   const [photoUrl, setPhotoUrl] = useState('');
   const [chatId, setChatId] = useState(null);
   const [replyText, setReplyText] = useState({});
-  const [pendingTickets, setPendingTickets] = useState([]);
+  // P2 #50: pending complaints localStorage me — reload par bhi na udein (photo preview RAM-only)
+  const [pendingTickets, setPendingTickets] = useState(() => {
+    try {
+      const arr = JSON.parse(localStorage.getItem('roomkhojo_support_pending') || '[]');
+      return Array.isArray(arr) ? arr.map(p => ({ tempId: p.tempId, category: p.category, message: p.message, failed: !!p.failed, photoFile: null, photoUrl: '' })) : [];
+    } catch { return []; }
+  });
+  // P2 #49: per-ticket unread badge — kaunse replies user ne dekhe (counts)
+  const [seenMap, setSeenMap] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('roomkhojo_support_seen') || '{}') || {}; } catch { return {}; }
+  });
+  const lastSubmitRef = useRef({ msg: '', time: 0 }); // P2 #50: double-tap duplicate guard
   const chatScrollRef = useRef(null);
 
   useEffect(() => {
     if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
   }, [chatId, tickets]);
+
+  // P2 #50: pending list persist (photoFile/URL persist nahi hota — security/format)
+  useEffect(() => {
+    try {
+      localStorage.setItem('roomkhojo_support_pending', JSON.stringify(
+        pendingTickets.map(({ tempId, category, message, failed }) => ({ tempId, category, message, failed }))
+      ));
+    } catch { /* quota full — skip */ }
+  }, [pendingTickets]);
 
   const fetchTickets = () => {
     apiFetch(`${API_BASE}/api/support/mine`, { headers: authHeaders() })
@@ -37,7 +57,38 @@ export default function Support() {
   useEffect(() => {
     if (!localStorage.getItem('roomkhojo_user')) { navigate('/'); return; }
     fetchTickets();
+    // P2 #49: auto-poll — 30s, tab hidden ho toh pause + wapas aane par turant refresh
+    const iv = setInterval(() => { if (!document.hidden) fetchTickets(); }, 30000);
+    const onVis = () => { if (!document.hidden) fetchTickets(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, [navigate]);
+
+  // P2 #49: unread = replies jo user ne dekhe nahi
+  const unreadCount = (t) => {
+    if (t.status === 'closed') return 0;
+    return Math.max(0, (t.replies || []).length - (seenMap[t._id] || 0));
+  };
+
+  const markSeen = (ticket) => {
+    if (!ticket) return;
+    const count = (ticket.replies || []).length;
+    setSeenMap(prev => {
+      if ((prev[ticket._id] || 0) >= count) return prev;
+      const next = { ...prev, [ticket._id]: count };
+      try { localStorage.setItem('roomkhojo_support_seen', JSON.stringify(next)); } catch { /* skip */ }
+      return next;
+    });
+  };
+
+  const openChat = (t) => { setChatId(t._id); markSeen(t); };
+
+  // Chat khula ho aur naya reply aaye (poll se) toh bhi seen mark karo
+  useEffect(() => {
+    if (!chatId) return;
+    const t = tickets.find(x => x._id === chatId);
+    if (t) markSeen(t);
+  }, [chatId, tickets]);
 
   const pickPhoto = (e) => {
     const f = (e.target.files || [])[0];
@@ -55,7 +106,15 @@ export default function Support() {
     const msg = retry ? retry.message : message.trim();
     const file = retry ? retry.photoFile : photo;
     if (!retry && msg.length < 5) return alert('Apni dikkat thode detail me likho (min 5 letters).');
-    const tempId = retry ? retry.tempId : `tmp-${Date.now()}`;
+    // P2 #50: double-tap guard — same text 3s ke andar dobara bheja toh ignore
+    if (!retry) {
+      const now = Date.now();
+      if (lastSubmitRef.current.msg === msg && now - lastSubmitRef.current.time < 3000) {
+        return alert('Ye complaint abhi bheji hai — dobara nahi bhej sakte. Thoda ruko.');
+      }
+      lastSubmitRef.current = { msg, time: now };
+    }
+    const tempId = retry ? retry.tempId : `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const previewUrl = retry ? retry.photoUrl : (photoUrl || (file ? URL.createObjectURL(file) : ''));
     if (!retry) {
       setPendingTickets(prev => [...prev, { tempId, category: cat, message: msg, photoFile: file || null, photoUrl: previewUrl, failed: false }]);
@@ -102,6 +161,15 @@ export default function Support() {
   };
 
   const chatTicket = chatId ? tickets.find(x => x._id === chatId) || null : null;
+
+  // P2 #50: pending complaint cancel (photo object URL revoke bhi)
+  const cancelPending = (tempId) => {
+    setPendingTickets(prev => {
+      const p = prev.find(x => x.tempId === tempId);
+      if (p?.photoUrl) { try { URL.revokeObjectURL(p.photoUrl); } catch { /* skip */ } }
+      return prev.filter(x => x.tempId !== tempId);
+    });
+  };
 
   const statusStyle = (s) => s === 'open'
     ? 'bg-orange-100 text-orange-700'
@@ -182,12 +250,16 @@ export default function Support() {
           <div key={p.tempId} className="bg-white rounded-3xl p-4 shadow-sm border border-dashed border-brand/40">
             <div className="flex justify-between items-center gap-2 mb-1">
               <span className="text-[10px] font-black px-2 py-1 rounded-lg uppercase bg-brand/10 text-brand">{p.category}</span>
-              {p.failed
-                ? <button onClick={() => submitTicket(p)} className="text-xs font-black text-white bg-red-500 px-3 py-1.5 rounded-lg active:scale-95">Retry</button>
-                : <span className="text-[11px] font-black text-gray-500 flex items-center gap-1.5"><span className="w-3 h-3 rounded-full border-2 border-brand border-t-transparent animate-spin" /> Bhej rahe hain…</span>}
+              <div className="flex items-center gap-2">
+                {p.failed
+                  ? <button onClick={() => submitTicket(p)} className="text-xs font-black text-white bg-red-500 px-3 py-1.5 rounded-lg active:scale-95">Retry</button>
+                  : <span className="text-[11px] font-black text-gray-500 flex items-center gap-1.5"><span className="w-3 h-3 rounded-full border-2 border-brand border-t-transparent animate-spin" /> Bhej rahe hain…</span>}
+                <button onClick={() => cancelPending(p.tempId)} className="text-xs font-black text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg active:scale-95">Cancel</button>
+              </div>
             </div>
             <p className="text-sm font-bold text-gray-700">{p.message}</p>
-            {p.failed && <p className="text-[11px] font-bold text-red-500 mt-1">Fail ho gaya — Retry dabao, text safe hai.</p>}
+            {p.photoUrl && <img src={p.photoUrl} className="w-24 h-20 rounded-xl object-cover border border-gray-200 mt-2" alt="Attachment" />}
+            {p.failed && <p className="text-[11px] font-bold text-red-500 mt-1">Bhej nahi paye — text safe hai. Retry dabao ya Cancel karo.</p>}
           </div>
         ))}
 
@@ -204,7 +276,10 @@ export default function Support() {
                 </span>
                 <p className="text-[11px] font-bold text-gray-400 mt-1">{t.category}</p>
               </div>
-              <button onClick={() => setChatId(t._id)} className="text-xs font-black text-white bg-brand px-3 py-1.5 rounded-lg shrink-0 active:scale-95">Chat kholo</button>
+              <button onClick={() => openChat(t)} className="text-xs font-black text-white bg-brand px-3 py-1.5 rounded-lg shrink-0 active:scale-95 relative">
+                Chat kholo
+                {unreadCount(t) > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-white">{unreadCount(t)}</span>}
+              </button>
             </div>
             <p className="text-sm font-bold text-gray-700">{t.message}</p>
             {t.image && <img src={t.image} className="w-32 h-24 rounded-xl object-cover border border-gray-200 mt-2" alt="Proof" />}

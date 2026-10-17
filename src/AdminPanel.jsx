@@ -15,9 +15,25 @@ const adminAuthHeaders = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+// P2 #51: JWT ka exp decode (base64url payload) — expired token se khaali panel na dikhe
+const getTokenExp = () => {
+  try {
+    const token = sessionStorage.getItem('roomkhojo_admin_token');
+    if (!token || token.split('.').length !== 3) return null;
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch { return null; }
+};
+
 export default function AdminPanel() {
-  // Refresh par admin session bana rahe (JWT sessionStorage me hai — lazy init)
-  const [isAuthenticated, setIsAuthenticated] = useState(() => !!sessionStorage.getItem('roomkhojo_admin_token'));
+  // Refresh par admin session bana rahe (JWT sessionStorage me hai — lazy init + exp check)
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const token = sessionStorage.getItem('roomkhojo_admin_token');
+    if (!token) return false;
+    const exp = getTokenExp();
+    if (exp && exp <= Date.now()) { sessionStorage.removeItem('roomkhojo_admin_token'); return false; }
+    return true;
+  });
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [adminRooms, setAdminRooms] = useState([]);
@@ -63,6 +79,22 @@ export default function AdminPanel() {
     window.addEventListener('rk:auth-expired', onExpired);
     return () => window.removeEventListener('rk:auth-expired', onExpired);
   }, []);
+
+  // P2 #51: har 60s JWT exp check — token expire hote hi login screen (API 401 ka wait nahi)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const check = () => {
+      const exp = getTokenExp();
+      if (exp && exp <= Date.now()) {
+        sessionStorage.removeItem('roomkhojo_admin_token');
+        setIsAuthenticated(false);
+        alert('Admin session expire ho gaya (12 ghante). Dobara login karein.');
+      }
+    };
+    check();
+    const iv = setInterval(check, 60000);
+    return () => clearInterval(iv);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated) return;

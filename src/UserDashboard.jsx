@@ -35,6 +35,14 @@ export default function UserDashboard() {
   const [editName, setEditName] = useState('');
   const [oldPw, setOldPw] = useState('');
   const [newPw, setNewPw] = useState('');
+  const [savingName, setSavingName] = useState(false); // P2 #48: save loading states
+  const [savingPw, setSavingPw] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [emailPw, setEmailPw] = useState('');
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [delPw, setDelPw] = useState('');
+  const [delConfirm, setDelConfirm] = useState('');
+  const [deletingAcc, setDeletingAcc] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   // Pehli load par skeleton dikhao (fetch complete hote hi hatेगा)
   const [adsLoaded, setAdsLoaded] = useState(false);
@@ -64,6 +72,7 @@ export default function UserDashboard() {
 
   // ❤️ Saved ads (favorites) + unsave
   const [savedRooms, setSavedRooms] = useState([]);
+  const unsaveBusyRef = useRef(new Set()); // P2 #47: double-tap guard (toggle wapas save kar deta tha)
 
   const fetchSaved = () => {
     apiFetch(`${BASE_URL}/api/users/favorites`, { headers: authHeaders() })
@@ -73,11 +82,15 @@ export default function UserDashboard() {
   };
 
   const unsaveRoom = async (roomId) => {
+    if (unsaveBusyRef.current.has(roomId)) return;
+    unsaveBusyRef.current.add(roomId);
     try {
       const res = await apiFetch(`${BASE_URL}/api/users/favorites/${roomId}/toggle`, { method: 'POST', headers: authHeaders() });
       const data = await res.json();
-      if (data.success && !data.saved) setSavedRooms(savedRooms.filter(r => r._id !== roomId));
+      // P2 #47: functional update — stale closure fix (purane savedRooms par nahi)
+      if (data.success && !data.saved) setSavedRooms(prev => prev.filter(r => r._id !== roomId));
     } catch { alert('Server connection failed.'); }
+    finally { unsaveBusyRef.current.delete(roomId); }
   };
 
   useEffect(() => {
@@ -150,7 +163,7 @@ export default function UserDashboard() {
     if(room.description) facilities = room.description.split(', ');
     
     setEditForm({
-      title: room.title, price: room.price.replace('₹', ''), type: room.type, 
+      title: room.title, price: String(room.price || '').replace('₹', ''), type: room.type, // P2 #47: number/missing price par crash nahi
       category: room.category, landmark: room.landmark, mobile: room.mobile, description: facilities
     });
     setEditingRoomId(room._id);
@@ -229,6 +242,8 @@ export default function UserDashboard() {
   // ⚙️ Settings: naam + password save
   const saveProfileName = async () => {
     if (!editName.trim()) return alert('Naam khaali nahi ho sakta.');
+    if (savingName) return; // P2 #48: double-tap guard
+    setSavingName(true);
     try {
       const res = await apiFetch(`${BASE_URL}/api/users/profile`, {
         method: 'PATCH',
@@ -243,10 +258,15 @@ export default function UserDashboard() {
         localStorage.setItem('roomkhojo_user', JSON.stringify(merged));
       }
     } catch { alert('Server connection failed.'); }
+    setSavingName(false);
   };
 
   const saveNewPassword = async () => {
     if (!oldPw || !newPw) return alert('Puraana aur naya password dono daliye.');
+    if (newPw.length < 6) return alert('Naya password kam se kam 6 characters ka ho.'); // P2 #48: client validation
+    if (newPw === oldPw) return alert('Naya password purane se alag rakho.');
+    if (savingPw) return;
+    setSavingPw(true);
     try {
       const res = await apiFetch(`${BASE_URL}/api/users/change-password`, {
         method: 'POST',
@@ -257,6 +277,49 @@ export default function UserDashboard() {
       alert(data.message);
       if (data.success) { setOldPw(''); setNewPw(''); }
     } catch { alert('Server connection failed.'); }
+    setSavingPw(false);
+  };
+
+  // 📧 P2 #48: Email change — password confirm (Google-only account me BE saaf mana karta hai)
+  const changeEmail = async () => {
+    if (!newEmail.trim() || !emailPw) return alert('Naya email aur password dono daliye.');
+    if (savingEmail) return;
+    setSavingEmail(true);
+    try {
+      const res = await apiFetch(`${BASE_URL}/api/users/change-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ newEmail: newEmail.trim(), password: emailPw })
+      });
+      const data = await res.json();
+      alert(data.message);
+      if (data.success && data.user) {
+        const merged = { ...currentUser, ...data.user };
+        setCurrentUser(merged);
+        localStorage.setItem('roomkhojo_user', JSON.stringify(merged));
+        setNewEmail(''); setEmailPw('');
+      }
+    } catch { alert('Server connection failed.'); }
+    setSavingEmail(false);
+  };
+
+  // 🗑️ P2 #48: Account delete — DELETE type + confirm + password (agar hai)
+  const deleteAccount = async () => {
+    if (delConfirm.trim().toUpperCase() !== 'DELETE') return alert('Confirm box me DELETE likho — tabhi delete hoga.');
+    if (!window.confirm('Pakka? Account + SAARE ads hamesha ke liye delete ho jayenge. Ye undo NAHI hota.')) return;
+    if (deletingAcc) return;
+    setDeletingAcc(true);
+    try {
+      const res = await apiFetch(`${BASE_URL}/api/users/delete-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ confirm: 'DELETE', password: delPw })
+      });
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) { localStorage.removeItem('roomkhojo_user'); localStorage.removeItem('roomkhojo_token'); navigate('/'); }
+    } catch { alert('Server connection failed.'); }
+    setDeletingAcc(false);
   };
 
   const getDaysLeft = (expiryDate, plan) => {
@@ -281,6 +344,7 @@ export default function UserDashboard() {
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-black text-gray-800 flex items-center gap-2"><Star className="text-brand"/> My Posted Ads</h2>
           <div className="flex items-center gap-2">
+            <button onClick={() => setRefreshKey(k => k + 1)} title="Refresh" className="bg-gray-100 text-gray-600 border border-gray-200 p-1.5 rounded-full active:scale-95 transition-transform"><RefreshCw size={14} /></button>
             <button onClick={openClaimModal} className="bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-full text-[11px] font-black flex items-center gap-1 active:scale-95"><Link size={12} /> Claim Purana Ad</button>
             <span className="bg-brand/10 text-brand px-3 py-1 rounded-full text-xs font-black">{myRooms.length} Total</span>
           </div>
@@ -372,6 +436,32 @@ export default function UserDashboard() {
             })}
         </div>
         )}
+
+        {/* ❤️ SAVED ADS — P2 #47: ab scrollable area ke ANDAR (pehle viewport ke bahar clip rehta tha) */}
+        {savedRooms.length > 0 && (
+          <div className="mt-8">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-black text-gray-800 flex items-center gap-2"><Heart size={20} className="text-pink-500" fill="currentColor" /> Saved Ads</h2>
+              <span className="bg-pink-100 text-pink-600 px-3 py-1 rounded-full text-xs font-black">{savedRooms.length} Total</span>
+            </div>
+            <div className="grid gap-3 pb-10">
+              {savedRooms.map(room => (
+                <div key={room._id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-pink-100 p-3 flex gap-3 items-center">
+                  <img src={getImageUrl(room.image)} className="w-16 h-16 rounded-xl object-cover bg-gray-200 shrink-0" alt="Room" />
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-black text-gray-800 leading-tight truncate">{room.title}</h3>
+                    <p className="text-brand font-black text-sm">{room.price}</p>
+                    <p className="text-[11px] font-bold text-gray-400 flex items-center gap-1"><MapPin size={12} className="shrink-0" /> {room.landmark || 'Hanumangarh'}</p>
+                  </div>
+                  <div className="flex flex-col gap-2 shrink-0">
+                    <a href={`tel:${room.mobile}`} className="bg-brand text-white p-2 rounded-xl flex items-center justify-center active:scale-95"><Phone size={16}/></a>
+                    <button onClick={() => unsaveRoom(room._id)} className="bg-red-50 text-red-600 p-2 rounded-xl flex items-center justify-center active:scale-95"><Trash2 size={16}/></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Logout ab Settings panel me hai (upar gear button) */}
@@ -440,43 +530,36 @@ export default function UserDashboard() {
               </div>
               <div>
                 <p className="text-xs font-black text-gray-500 mb-2 uppercase">Display Name</p>
-                <div className="flex gap-2"><input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Apna naam" className="flex-1 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveProfileName} className="bg-slate-900 text-white px-4 rounded-xl font-black text-sm active:scale-95">Save</button></div>
+                <div className="flex gap-2"><input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Apna naam" className="flex-1 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveProfileName} disabled={savingName} className="bg-slate-900 text-white px-4 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingName ? '…' : 'Save'}</button></div>
               </div>
               <div>
                 <p className="text-xs font-black text-gray-500 mb-2 uppercase">Password Badlo</p>
-                <div className="space-y-2"><input type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} placeholder="Puraana password" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="Naya password (min 6)" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveNewPassword} className="w-full bg-blue-600 text-white py-3 rounded-xl font-black text-sm active:scale-95">Update Password</button></div>
+                <div className="space-y-2"><input type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} placeholder="Puraana password" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="Naya password (min 6)" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveNewPassword} disabled={savingPw} className="w-full bg-blue-600 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingPw ? 'Update ho raha hai…' : 'Update Password'}</button></div>
                 <p className="text-[11px] font-bold text-gray-400 mt-2">Google se login karte ho? Toh password hai hi nahi — seedha logout/login karo.</p>
+              </div>
+              {/* 📧 P2 #48: Email change — password confirm zaroori */}
+              <div>
+                <p className="text-xs font-black text-gray-500 mb-2 uppercase">Email Badlo</p>
+                <div className="space-y-2">
+                  <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="Naya email address" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
+                  <input type="password" value={emailPw} onChange={(e) => setEmailPw(e.target.value)} placeholder="Confirm karne ke liye password" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
+                  <button onClick={changeEmail} disabled={savingEmail} className="w-full bg-slate-700 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingEmail ? 'Update ho raha hai…' : 'Email Update Karein'}</button>
+                </div>
+              </div>
+              {/* 🗑️ P2 #48: Danger zone — account delete (DELETE type + confirm) */}
+              <div className="border border-red-100 bg-red-50/60 rounded-2xl p-4">
+                <p className="text-xs font-black text-red-600 mb-2 uppercase flex items-center gap-1"><AlertTriangle size={13} /> Danger Zone — Account Delete</p>
+                <p className="text-[11px] font-bold text-red-500 mb-3">Account ke saath aapke SAARE ads bhi hamesha ke liye delete ho jayenge. Ye undo nahi hota.</p>
+                <div className="space-y-2">
+                  <input type="password" value={delPw} onChange={(e) => setDelPw(e.target.value)} placeholder="Password (agar hai)" className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border border-red-200" />
+                  <input type="text" value={delConfirm} onChange={(e) => setDelConfirm(e.target.value)} placeholder='Confirm ke liye "DELETE" likho' className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border border-red-200" />
+                  <button onClick={deleteAccount} disabled={deletingAcc} className="w-full bg-red-600 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{deletingAcc ? 'Delete ho raha hai…' : 'Account Hamesha Ke Liye Delete Karein'}</button>
+                </div>
               </div>
             </div>
             <div className="p-4 border-t bg-white sticky bottom-0 z-10 shrink-0">
               <button onClick={handleLogout} className="w-full bg-red-50 text-red-600 py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 active:scale-95"><LogOut size={20}/> Logout</button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ❤️ SAVED ADS */}
-      {savedRooms.length > 0 && (
-        <div className="mt-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-black text-gray-800 flex items-center gap-2"><Heart size={20} className="text-pink-500" fill="currentColor" /> Saved Ads</h2>
-            <span className="bg-pink-100 text-pink-600 px-3 py-1 rounded-full text-xs font-black">{savedRooms.length} Total</span>
-          </div>
-          <div className="grid gap-3 pb-10">
-            {savedRooms.map(room => (
-              <div key={room._id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-pink-100 p-3 flex gap-3 items-center">
-                <img src={getImageUrl(room.image)} className="w-16 h-16 rounded-xl object-cover bg-gray-200 shrink-0" alt="Room" />
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-black text-gray-800 leading-tight truncate">{room.title}</h3>
-                  <p className="text-brand font-black text-sm">{room.price}</p>
-                  <p className="text-[11px] font-bold text-gray-400 flex items-center gap-1"><MapPin size={12} className="shrink-0" /> {room.landmark || 'Hanumangarh'}</p>
-                </div>
-                <div className="flex flex-col gap-2 shrink-0">
-                  <a href={`tel:${room.mobile}`} className="bg-brand text-white p-2 rounded-xl flex items-center justify-center active:scale-95"><Phone size={16}/></a>
-                  <button onClick={() => unsaveRoom(room._id)} className="bg-red-50 text-red-600 p-2 rounded-xl flex items-center justify-center active:scale-95"><Trash2 size={16}/></button>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}
