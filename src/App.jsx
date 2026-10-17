@@ -6,11 +6,19 @@ import PromoPopup from './PromoPopup';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
 
 // M6 fix: route-wise code splitting — pehla load chhota, baaki pages demand par
-const MainApp = lazy(() => import('./MainApp'));
-const AdminPanel = lazy(() => import('./AdminPanel'));
-const UserDashboard = lazy(() => import('./UserDashboard'));
-const LegalPage = lazy(() => import('./LegalPage'));
-const Support = lazy(() => import('./Support'));
+// Hotfix: flaky mobile net par chunk fail ho toh 2 retry (fir ErrorBoundary + auto-reload)
+const lazyRetry = (importer) => lazy(() => new Promise((resolve, reject) => {
+  const load = (tryNo) => importer().then(resolve).catch((err) => {
+    if (tryNo >= 2) return reject(err);
+    setTimeout(() => load(tryNo + 1), 900);
+  });
+  load(0);
+}));
+const MainApp = lazyRetry(() => import('./MainApp'));
+const AdminPanel = lazyRetry(() => import('./AdminPanel'));
+const UserDashboard = lazyRetry(() => import('./UserDashboard'));
+const LegalPage = lazyRetry(() => import('./LegalPage'));
+const Support = lazyRetry(() => import('./Support'));
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-api.onrender.com').replace(/\/api\/?$/, ''); // P2 #58: sirf trailing /api strip (beech ka '/api' nahi)
 const DEFAULT_ADMIN_PATH = '/admin-secret-29';
@@ -43,6 +51,24 @@ const NotFound = () => (
   </div>
 );
 
+// Hotfix: chunk/network load failure detect (SW ya flaky net se MIME/import error)
+const isChunkLoadError = (err) => /dynamically imported module|Importing a module script failed|MIME type|error loading dynamically/i.test(String((err && err.message) || err || ''));
+
+// Hotfix: stuck cache/SW wale users ke liye escape hatch — SW unregister + caches clear + reload
+const hardResetApp = async () => {
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (e) { /* kuch fail ho toh bhi reload karo */ }
+  window.location.reload();
+};
+
 // 🛡️ P2 #58: ErrorBoundary — kisi bhi page ke crash par blank white screen ke bajaye saaf message
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -54,6 +80,16 @@ class ErrorBoundary extends Component {
   }
   componentDidCatch(error, info) {
     console.error('App crash:', error, info && info.componentStack);
+    // Hotfix: chunk load fail (network/SW) → ek baar auto-reload, loop guard 30s
+    if (isChunkLoadError(error)) {
+      try {
+        const last = Number(sessionStorage.getItem('rk_boot_reload_at') || 0);
+        if (Date.now() - last > 30000) {
+          sessionStorage.setItem('rk_boot_reload_at', String(Date.now()));
+          window.location.reload();
+        }
+      } catch (e) { /* private mode me storage na chale toh UI hi dikhega */ }
+    }
   }
   render() {
     if (this.state.hasError) {
@@ -63,10 +99,29 @@ class ErrorBoundary extends Component {
           <p className="text-lg font-black text-gray-700">Kuch gadbad ho gayi</p>
           <p className="text-xs font-bold text-gray-400 text-center max-w-xs">Page load karte waqt error aa gaya. Neeche button dabao — app theek ho jayega.</p>
           <button onClick={() => window.location.reload()} className="mt-4 bg-brand text-white px-6 py-3 rounded-2xl font-black text-sm active:scale-95">App Reload Karo</button>
+          <button onClick={hardResetApp} className="text-xs font-bold text-gray-500 underline underline-offset-2">Phir bhi na chale? Cache clear karke reload</button>
+          <p className="text-[10px] text-gray-400 text-center max-w-xs break-words px-4">{String((this.state.error && this.state.error.message) || this.state.error || '').slice(0, 160)}</p>
         </div>
       );
     }
     return this.props.children;
+  }
+}
+
+// Hotfix: popup ke kisi bhi bug se pura app crash na ho — silent boundary
+class Silence extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { err: false };
+  }
+  static getDerivedStateFromError() {
+    return { err: true };
+  }
+  componentDidCatch(error) {
+    console.error('Popup crash (silenced):', error);
+  }
+  render() {
+    return this.state.err ? null : this.props.children;
   }
 }
 
@@ -112,7 +167,7 @@ export default function App() {
         </Routes>
       </Suspense>
       {/* P2 #62: Popup ab Router ke andar — route-exclude (dashboard/admin/support) ke liye */}
-      <PromoPopup adminPath={adminPath} />
+      <Silence><PromoPopup adminPath={adminPath} /></Silence>
     </Router>
   );
 
