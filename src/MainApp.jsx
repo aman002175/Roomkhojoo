@@ -277,6 +277,9 @@ export default function MainApp() {
     pricing: { regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: 'admin@ybl', bannerPrice: '499', bannerDays: '7' }
   });
 
+  // Hotfix: batch-9 refactor me ye definition galti se delete ho gayi thi — chips row "dynamicCategories is not defined" crash karta tha
+  const dynamicCategories = [{ id: 'all', name: 'All Rooms' }, ...(sysSettings.categories || []).map(cat => ({ id: cat, name: cat }))];
+
   // P1 #33: rooms load-fail par misleading "koi result nahi" nahi — error card + Retry
   const [roomsError, setRoomsError] = useState(false);
   const [roomsReloadKey, setRoomsReloadKey] = useState(0);

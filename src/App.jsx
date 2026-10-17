@@ -65,7 +65,7 @@ const hardResetApp = async () => {
       const keys = await caches.keys();
       await Promise.all(keys.map(k => caches.delete(k)));
     }
-  } catch (e) { /* kuch fail ho toh bhi reload karo */ }
+  } catch { /* kuch fail ho toh bhi reload karo */ }
   window.location.reload();
 };
 
@@ -88,7 +88,7 @@ class ErrorBoundary extends Component {
           sessionStorage.setItem('rk_boot_reload_at', String(Date.now()));
           window.location.reload();
         }
-      } catch (e) { /* private mode me storage na chale toh UI hi dikhega */ }
+      } catch { /* private mode me storage na chale toh UI hi dikhega */ }
     }
   }
   render() {
