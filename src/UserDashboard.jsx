@@ -590,8 +590,8 @@ export default function UserDashboard() {
               <div className="space-y-3">
                 <div><label className="text-xs font-bold text-gray-500 ml-1">Title</label><input type="text" value={editForm.title} onChange={(e) => setEditForm({...editForm, title: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
                 <div className="flex gap-3">
-                  <div className="flex-1"><label className="text-xs font-bold text-gray-500 ml-1">Rent (₹)</label><input type="number" value={editForm.price} onChange={(e) => setEditForm({...editForm, price: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
-                  <div className="flex-1"><label className="text-xs font-bold text-gray-500 ml-1">Mobile No.</label><input type="number" value={editForm.mobile} onChange={(e) => setEditForm({...editForm, mobile: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
+                  <div className="flex-1 min-w-0"><label className="text-xs font-bold text-gray-500 ml-1">Rent (₹)</label><input type="number" value={editForm.price} onChange={(e) => setEditForm({...editForm, price: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
+                  <div className="flex-1 min-w-0"><label className="text-xs font-bold text-gray-500 ml-1">Mobile No.</label><input type="number" value={editForm.mobile} onChange={(e) => setEditForm({...editForm, mobile: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
                 </div>
                 <div><label className="text-xs font-bold text-gray-500 ml-1">Landmark</label><input type="text" value={editForm.landmark} onChange={(e) => setEditForm({...editForm, landmark: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
               </div>
