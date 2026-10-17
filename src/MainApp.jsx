@@ -174,6 +174,7 @@ export default function MainApp() {
   const markersRef = useRef([]);
   const userLocMarkerRef = useRef(null); 
   const submitLockRef = useRef(false); // 🚫 double-submit guard (duplicate ads rokne ke liye)
+  const geoWatchIdRef = useRef(null); // 📍 blue-dot live watch id (unmount par clearWatch — P1 #27)
 
   const [view, setView] = useState('map'); 
   const [selectedRoom, setSelectedRoom] = useState(null);
@@ -250,7 +251,7 @@ export default function MainApp() {
   const switchMapStyle = (s) => {
     setMapStyle(s);
     if (map.current) {
-      try { map.current.setStyle(s === 'sat' ? SAT_STYLE : MAP_STYLE); } catch { /* ignore */ }
+      try { if (map.current) map.current.setStyle(s === 'sat' ? SAT_STYLE : MAP_STYLE); } catch { /* ignore */ }
     }
   };
 
@@ -426,6 +427,17 @@ export default function MainApp() {
     return String(ad + banner);
   };
 
+  // 📍 Blue dot marker create/update (guarded — map null ho toh crash nahi; P1 #27/#29)
+  const updateUserMarker = (latitude, longitude) => {
+    if (!map.current) return;
+    if (userLocMarkerRef.current) {
+      userLocMarkerRef.current.setLngLat([longitude, latitude]);
+      return;
+    }
+    const el = document.createElement('div'); el.className = 'w-5 h-5 bg-blue-500 border-[3px] border-white rounded-full shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-pulse';
+    userLocMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([longitude, latitude]).addTo(map.current);
+  };
+
   const handleLiveLocation = (sharp = false) => {
     if (navigator.geolocation) {
       setIsLocating(true);
@@ -437,9 +449,16 @@ export default function MainApp() {
         const zoom = sharp ? (acc <= 30 ? 18 : acc <= 100 ? 17 : acc <= 300 ? 16 : 15) : (acc <= 100 ? 16.5 : 15.5);
         if(map.current) map.current.flyTo({ center: [longitude, latitude], zoom });
         setPostLng(longitude); setPostLat(latitude);
-        if (userLocMarkerRef.current) userLocMarkerRef.current.remove();
-        const el = document.createElement('div'); el.className = 'w-5 h-5 bg-blue-500 border-[3px] border-white rounded-full shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-pulse';
-        userLocMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([longitude, latitude]).addTo(map.current);
+        updateUserMarker(latitude, longitude);
+        // P1 #27: pehli location ke baad live watch chalu — blue dot stale nahi rehta.
+        // (Permission ab mil chuki hai; unmount par clearWatch neeche wale effect me.)
+        if (geoWatchIdRef.current === null) {
+          geoWatchIdRef.current = navigator.geolocation.watchPosition(
+            (p) => updateUserMarker(p.coords.latitude, p.coords.longitude),
+            () => { /* watch fail: purana dot hi dikhega, crash nahi */ },
+            { enableHighAccuracy: false, maximumAge: 20000, timeout: 20000 }
+          );
+        }
       }, () => {
         setIsLocating(false);
         alert("Location permission denied ya accuracy issue hai. Kripya map par drag karke location pin karein.");
@@ -508,7 +527,22 @@ export default function MainApp() {
     if (map.current || mapDead) return;
     map.current = new maplibregl.Map({ container: mapContainer.current, style: MAP_STYLE, center: [74.3218, 29.5894], zoom: 13, maxZoom: 19, attributionControl: { compact: true } });
     map.current.on('load', () => setMapLoaded(true));
+    // 🧹 P1 #28: unmount (ya map dead) par poora map destroy — WebGL context/workers leak na ho
+    return () => {
+      if (userLocMarkerRef.current) { userLocMarkerRef.current.remove(); userLocMarkerRef.current = null; }
+      markersRef.current.forEach(m => m.remove()); markersRef.current = [];
+      if (map.current) { map.current.remove(); map.current = null; }
+      setMapLoaded(false);
+    };
   }, [mapDead]);
+
+  // 🧹 P1 #27: geolocation watch unmount par band (battery + memory)
+  useEffect(() => () => {
+    if (geoWatchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(geoWatchIdRef.current);
+      geoWatchIdRef.current = null;
+    }
+  }, []);
 
   // useMemo: har render par nayi array NA banao — warna markers bekaar me rebuild (flicker)
   const filteredRooms = useMemo(() => rooms.filter(r => {
@@ -522,7 +556,8 @@ export default function MainApp() {
       okNear = distMeters(userLoc.lat, userLoc.lng, r.lat, r.lng) <= nearRadius * 1000;
     }
     const searchStr = searchQuery.toLowerCase();
-    const matchesSearch = r.title.toLowerCase().includes(searchStr) || (r.landmark || 'hanumangarh').toLowerCase().includes(searchStr) || r.type.toLowerCase().includes(searchStr) || r.category.toLowerCase().includes(searchStr);
+    // P1 #30: title/type/category missing ho (purana/khaali data) toh bhi crash nahi
+    const matchesSearch = (r.title || '').toLowerCase().includes(searchStr) || (r.landmark || 'hanumangarh').toLowerCase().includes(searchStr) || (r.type || '').toLowerCase().includes(searchStr) || (r.category || '').toLowerCase().includes(searchStr);
     return matchesCategory && matchesAudience && matchesSearch && okMin && okMax && okNear;
   }), [rooms, activeCategory, activeAudience, searchQuery, minPrice, maxPrice, nearRadius, userLoc]);
 
@@ -860,7 +895,7 @@ export default function MainApp() {
       dot.className = `w-2 h-2 rounded-full border border-white shadow-md ${featured ? 'bg-orange-500' : 'bg-green-600'}`;
       dot.style.marginBottom = '-4px';
       el.appendChild(chip); el.appendChild(dot);
-      const onClick = (e) => { e.stopPropagation(); openRoomPopup(room); map.current.flyTo({ center: [room.lng, room.lat], zoom: 15.5 }); };
+      const onClick = (e) => { e.stopPropagation(); openRoomPopup(room); if (map.current) map.current.flyTo({ center: [room.lng, room.lat], zoom: 15.5 }); };
       el.addEventListener('click', onClick); el.addEventListener('touchstart', onClick);
       const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([room.lng, room.lat]).addTo(map.current); markersRef.current.push(marker);
     });
@@ -1015,7 +1050,7 @@ export default function MainApp() {
         )}
       </div>
 
-      {isPickingLocation ? (<div className="bg-white border-t py-3 px-6 flex justify-between items-center z-50 h-[64px] shrink-0"><button onClick={() => { const center = map.current.getCenter(); setPostLng(center.lng); setPostLat(center.lat); setIsPickingLocation(false); setGpsAccuracy(null); setIsPostAdOpen(true); }} className="w-full bg-brand text-white py-2.5 rounded-2xl font-black shadow-lg flex justify-center items-center gap-2 active:scale-95 transition-transform"><MapPin size={20}/> Confirm Location</button></div>) : (<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={handlePostAdClick} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://aman-bishnoi-wrold.oneapp.dev/#portfolio" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by Aman Bishnoi</a></div></div>)}
+      {isPickingLocation ? (<div className="bg-white border-t py-3 px-6 flex justify-between items-center z-50 h-[64px] shrink-0"><button onClick={() => { if (!map.current) return; const center = map.current.getCenter(); setPostLng(center.lng); setPostLat(center.lat); setIsPickingLocation(false); setGpsAccuracy(null); setIsPostAdOpen(true); }} className="w-full bg-brand text-white py-2.5 rounded-2xl font-black shadow-lg flex justify-center items-center gap-2 active:scale-95 transition-transform"><MapPin size={20}/> Confirm Location</button></div>) : (<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={handlePostAdClick} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://aman-bishnoi-wrold.oneapp.dev/#portfolio" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by Aman Bishnoi</a></div></div>)}
 
       <div className={`fixed inset-0 z-[8000] transition-opacity duration-300 ${isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}><div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setIsMenuOpen(false)}></div><div className={`absolute top-0 left-0 bottom-0 w-[80%] max-w-sm bg-white flex flex-col transition-transform duration-300 ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}><div className="p-6 bg-brand/5 border-b"><h2 className="text-3xl font-black text-gray-800">Room<span className="text-brand">Khojo</span></h2></div><div className="p-4 space-y-2 flex-1 overflow-y-auto mt-4"><button onClick={() => { navigate('/about'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Info size={20} className="text-brand"/> About Us</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/terms'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><FileText size={20} className="text-brand"/> Terms</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/refund'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Shield size={20} className="text-brand"/> Refund Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { if (!isLoggedIn) { setIsMenuOpen(false); setAuthMode('login'); } else { navigate('/support'); setIsMenuOpen(false); } }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-brand/5 hover:bg-brand/10 font-bold text-gray-700 border border-brand/20"><div className="flex items-center gap-3"><LifeBuoy size={20} className="text-brand"/> Support</div> <ChevronRight size={18} className="text-gray-400"/></button></div></div></div>
       <div className={`fixed inset-0 z-[7500] bg-white transition-transform duration-500 ${authMode ? 'translate-y-0' : 'translate-y-full'}`}>
