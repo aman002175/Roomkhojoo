@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import PromoPopup from './PromoPopup';
+import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
 
 // M6 fix: route-wise code splitting — pehla load chhota, baaki pages demand par
 const MainApp = lazy(() => import('./MainApp'));
@@ -40,7 +41,7 @@ export default function App() {
   const [adminPath, setAdminPath] = useState(() => normalizePath(import.meta.env.VITE_ADMIN_PATH));
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/admin/settings`)
+    apiFetch(`${API_BASE}/api/admin/settings`)
       .then(res => res.json())
       .then(data => {
         if (data.success && data.settings && data.settings.adminPath) {

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as maplibregl from 'maplibre-gl'; // v6 ESM-only: namespace import (default import hata)
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { X, Phone, MessageCircle, Map as MapIcon, List, Plus, Camera, Target, Info, FileText, Shield, ChevronRight, Menu, User, MapPin, Lock, Search, Navigation, Loader2, AlertTriangle, Heart, Share2, Megaphone, Landmark, TrainFront, Bus, Hospital, Stethoscope, GraduationCap, School, BookOpen, Star, Satellite, Ruler, Send, Copy, Home, Users, Building2, Briefcase, Hotel, Check, Tag, Image as ImageIcon, LifeBuoy } from 'lucide-react';
+import { X, Phone, MessageCircle, Map as MapIcon, List, Plus, Camera, Target, Info, FileText, Shield, ChevronRight, Menu, User, MapPin, Lock, Search, Navigation, Loader2, AlertTriangle, Heart, Share2, Megaphone, Landmark, TrainFront, Bus, Hospital, Stethoscope, GraduationCap, School, BookOpen, Star, Satellite, Ruler, RefreshCw, Send, Copy, Home, Users, Building2, Briefcase, Hotel, Check, Tag, Image as ImageIcon, LifeBuoy } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import { markerIcon, ICON_STAR } from './markerIcons';
+import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (sab calls)
 
 // Effective-featured: promo + expiry valid ho tabhi orange STAR,
 // expire ho chuka toh NORMAL green (ad gayab nahi hota).
@@ -40,7 +41,7 @@ const viewedIds = new Set();
 const markRoomViewed = (room) => {
   if (room && room._id && !viewedIds.has(room._id)) {
     viewedIds.add(room._id);
-    fetch(`${BASE_URL}/api/rooms/${room._id}/view`, { method: 'PUT' }).catch(() => {});
+    apiFetch(`${BASE_URL}/api/rooms/${room._id}/view`, { method: 'PUT' }).catch(() => {});
   }
 };
 
@@ -128,7 +129,7 @@ const catIcon = (id) => CAT_ICONS[id] || Tag;
 // Overpass API (free, no key): 1.5km me coaching/hospital/bus/railway dhoondo
 const fetchNearbyPOI = async (lat, lng, radius = 1500) => {
   const q = `[out:json][timeout:25];(nwr["amenity"~"^(school|college|university|training|hospital|clinic|doctors)$"](around:${radius},${lat},${lng});nwr["highway"="bus_stop"](around:${radius},${lat},${lng});nwr["amenity"="bus_station"](around:${radius},${lat},${lng});nwr["railway"~"^(station|halt)$"](around:${radius},${lat},${lng}););out center 20;`;
-  const res = await fetch('https://overpass.kumi.systems/api/interpreter', {
+  const res = await apiFetch('https://overpass.kumi.systems/api/interpreter', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'data=' + encodeURIComponent(q)
@@ -260,8 +261,13 @@ export default function MainApp() {
     pricing: { regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: 'admin@ybl', bannerPrice: '499', bannerDays: '7' }
   });
 
+  // P1 #33: rooms load-fail par misleading "koi result nahi" nahi — error card + Retry
+  const [roomsError, setRoomsError] = useState(false);
+  const [roomsReloadKey, setRoomsReloadKey] = useState(0);
+
   useEffect(() => {
-    fetch(`${API_URL}`)
+    setRoomsError(false);
+    apiFetch(`${API_URL}`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -272,10 +278,10 @@ export default function MainApp() {
             const found = (data.rooms || []).find(r => r._id === rid);
             if (found) { setSelectedRoom(found); markRoomViewed(found); }
           }
-        }
+        } else setRoomsError(true);
       })
-      .catch(() => { /* list load fail: agli baar retry hoga */ });
-    fetch(`${ADMIN_API}/settings`)
+      .catch(() => { setRoomsError(true); /* P1 #33: retry button dikhega */ });
+    apiFetch(`${ADMIN_API}/settings`)
       .then(res => res.json())
       .then(data => {
         if (data.success && data.settings) {
@@ -284,7 +290,7 @@ export default function MainApp() {
         }
       })
       .catch(() => { /* settings optional: defaults use honge */ });
-  }, []);
+  }, [roomsReloadKey]);
   const dynamicCategories = [{ id: 'all', name: 'All Rooms' }, ...sysSettings.categories.map(cat => ({ id: cat, name: cat }))];
 
   // Login/signup success par session save (token + user)
@@ -295,11 +301,23 @@ export default function MainApp() {
     setAuthMode(null);
   };
 
+  // 🔐 P1 #32: kabhi bhi 401 (session expire) → auto logout + login screen
+  useEffect(() => {
+    const onExpired = (e) => {
+      if (e.detail !== 'user') return;
+      setIsLoggedIn(false);
+      setAuthMode('login');
+      alert('Aapka session expire ho gaya. Dobara login karein.');
+    };
+    window.addEventListener('rk:auth-expired', onExpired);
+    return () => window.removeEventListener('rk:auth-expired', onExpired);
+  }, []);
+
   // Google idToken backend par verify hota hai (C7 fix — client-parsing nahi)
   const handleGoogleSuccess = async (credentialResponse) => {
     if (!termsOk) return alert('Pehle Terms & Refund Policy accept karo (neeche checkbox).');
     try {
-      const res = await fetch(`${BASE_URL}/api/users/google`, {
+      const res = await apiFetch(`${BASE_URL}/api/users/google`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idToken: credentialResponse.credential })
@@ -318,7 +336,7 @@ export default function MainApp() {
       const body = authMode === 'signup'
         ? { name: authName.trim(), email: authEmail.trim(), password: authPass }
         : { email: authEmail.trim(), password: authPass };
-      const res = await fetch(`${BASE_URL}/api/users/${endpoint}`, {
+      const res = await apiFetch(`${BASE_URL}/api/users/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -332,7 +350,7 @@ export default function MainApp() {
   // Forgot password — OTP flow (R1-R4)
   const handleForgotSend = async () => {
     try {
-      const res = await fetch(`${BASE_URL}/api/users/forgot-password`, {
+      const res = await apiFetch(`${BASE_URL}/api/users/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotEmail.trim() })
@@ -345,7 +363,7 @@ export default function MainApp() {
 
   const handleForgotVerify = async () => {
     try {
-      const res = await fetch(`${BASE_URL}/api/users/verify-otp`, {
+      const res = await apiFetch(`${BASE_URL}/api/users/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotEmail.trim(), otp: forgotOtp.trim() })
@@ -358,7 +376,7 @@ export default function MainApp() {
 
   const handleForgotReset = async () => {
     try {
-      const res = await fetch(`${BASE_URL}/api/users/reset-password`, {
+      const res = await apiFetch(`${BASE_URL}/api/users/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotEmail.trim(), resetToken: forgotResetToken, newPassword: forgotNewPass })
@@ -466,11 +484,30 @@ export default function MainApp() {
     }
   };
 
+  // 📍 P1 #26: form se GPS refresh — stale/purana pin kabhi bhi update kar sakte ho.
+  // Low accuracy (>150m) par purana pin CHUPKE se overwrite nahi hota — warning modal.
+  const refreshGpsPin = () => {
+    if (!navigator.geolocation) return alert('Browser location support nahi karta.');
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const acc = Math.round(pos.coords.accuracy || 0);
+      setIsLocating(false);
+      setGpsAccuracy(acc);
+      if (acc > 150) { setShowLocationWarning(true); return; }
+      setPostLng(pos.coords.longitude); setPostLat(pos.coords.latitude);
+      updateUserMarker(pos.coords.latitude, pos.coords.longitude);
+      if (map.current) map.current.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
+    }, () => {
+      setIsLocating(false);
+      alert('Location nahi mili — GPS/permission check karke dobara try karein.');
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+  };
+
   const handleMapSearch = async (e) => {
     if (e.key === 'Enter' || e.type === 'click') {
       if (!searchQuery.trim()) return;
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}+India`); const data = await res.json();
+        const res = await apiFetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}+India`); const data = await res.json();
         if (data && data.length > 0) { if (map.current) map.current.flyTo({ center: [parseFloat(data[0].lon), parseFloat(data[0].lat)], zoom: 13, speed: 1.5 }); } else { alert(`Nahi mila.`); }
       } catch { /* search fail: user dobara try karega */ }
     }
@@ -509,7 +546,7 @@ export default function MainApp() {
       postImages.forEach(p => fd.append('images', p.file));
 
       // NOTE: userId/ownerName server token se leta hai (spoof-proof).
-      const res = await fetch(API_URL, { method: 'POST', headers: authHeaders(), body: fd }); 
+      const res = await apiFetch(API_URL, { method: 'POST', headers: authHeaders(), body: fd, signal: AbortSignal.timeout(60000) }); // photos upload: 60s
       const data = await res.json().catch(() => null);
       if(data && data.success) { 
         alert(data.message || 'Ad submitted!'); 
@@ -587,7 +624,7 @@ export default function MainApp() {
 
   // 🎯 Banner strip data + auto-flip (har 4 sec)
   useEffect(() => {
-    fetch(`${BASE_URL}/api/rooms/banners`)
+    apiFetch(`${BASE_URL}/api/rooms/banners`)
       .then(res => res.json())
       .then(data => { if (data.success) { setBannerRooms(data.rooms || []); setBannerIndex(0); } })
       .catch(() => { /* banner optional: strip chhupa rahega */ });
@@ -673,7 +710,7 @@ export default function MainApp() {
   // ❤️ Favorites load (login par) + toggle
   useEffect(() => {
     if (!isLoggedIn) return;
-    fetch(`${BASE_URL}/api/users/favorites`, { headers: authHeaders() })
+    apiFetch(`${BASE_URL}/api/users/favorites`, { headers: authHeaders() })
       .then(res => res.json())
       .then(data => {
         if (data.success) setSavedIds((data.rooms || []).map(r => r._id));
@@ -685,7 +722,7 @@ export default function MainApp() {
   const toggleFavorite = async (roomId) => {
     if (!isLoggedIn) { setAuthMode('login'); return; }
     try {
-      const res = await fetch(`${BASE_URL}/api/users/favorites/${roomId}/toggle`, { method: 'POST', headers: authHeaders() });
+      const res = await apiFetch(`${BASE_URL}/api/users/favorites/${roomId}/toggle`, { method: 'POST', headers: authHeaders() });
       const data = await res.json();
       if (data.success) setSavedIds(prev => data.saved ? [...prev, roomId] : prev.filter(id => id !== roomId));
       else alert(data.message || 'Fail ho gaya.');
@@ -861,7 +898,7 @@ export default function MainApp() {
 
   const handleReportUnavailable = async (roomId) => {
     try {
-      const res = await fetch(`${BASE_URL}/api/rooms/${roomId}/report-unavailable`, { method: 'PUT' });
+      const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}/report-unavailable`, { method: 'PUT' });
       if (res.ok) {
         alert("Thanks for reporting! Admin will verify and update it.");
       }
@@ -1000,6 +1037,7 @@ export default function MainApp() {
           );
         })()}
         <div className={`absolute inset-0 transition-opacity duration-500 ${view === 'map' ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}><div ref={mapContainer} className="w-full h-full" /></div>
+        {view === 'map' && roomsError && rooms.length === 0 && (<div className="absolute top-24 left-1/2 -translate-x-1/2 z-40 bg-white shadow-xl border border-amber-200 rounded-2xl px-4 py-2 flex items-center gap-2"><AlertTriangle size={16} className="text-amber-500 shrink-0" /><span className="text-xs font-bold text-gray-700">Ads load nahi hue.</span><button onClick={() => setRoomsReloadKey(k => k + 1)} className="text-xs font-black text-brand underline shrink-0">Retry</button></div>)}
         {view === 'map' && !isPickingLocation && (<button onClick={() => handleLiveLocation(false)} disabled={isLocating} className="absolute bottom-28 right-4 z-40 bg-white p-3 rounded-full shadow-xl border border-gray-100 text-brand active:scale-90 transition-transform disabled:opacity-60 disabled:cursor-wait">{isLocating ? <Loader2 size={24} className="animate-spin" /> : <Navigation size={24} fill="currentColor"/>}</button>)}
         {view === 'map' && (<button onClick={() => switchMapStyle(mapStyle === 'street' ? 'sat' : 'street')} className="absolute left-4 bottom-28 z-40 bg-white px-3 py-2 rounded-full shadow-xl border border-gray-100 text-xs font-black text-gray-700 flex items-center gap-1.5 active:scale-90 transition-transform">{mapStyle === 'street' ? (<><Satellite size={14} /> Satellite</>) : (<><MapIcon size={14} /> Street</>)}</button>)}
         {view === 'map' && isPickingLocation && (<button onClick={() => handleLiveLocation(true)} disabled={isLocating} className="absolute bottom-[90px] right-4 z-40 bg-white px-4 py-2.5 rounded-full shadow-xl border border-gray-100 text-brand font-black text-xs flex items-center gap-2 active:scale-90 transition-transform disabled:opacity-70 disabled:cursor-wait">{isLocating ? (<><Loader2 size={16} className="animate-spin" /> Finding Your Location…</>) : (<><Navigation size={16} fill="currentColor"/> My Location</>)}</button>)}
@@ -1019,7 +1057,7 @@ export default function MainApp() {
         
         <div className={`absolute inset-0 z-20 bg-background overflow-y-auto p-4 transition-transform duration-500 ${view === 'list' ? 'translate-y-0' : 'translate-y-full'}`}>
           <div className="grid gap-5 pb-32">
-            {sortedRooms.length === 0 ? (<div className="text-center p-10 text-gray-500 font-bold">Koi result nahi mila.</div>) : (sortedRooms.map(room => (
+            {roomsError ? (<div className="text-center p-10"><AlertTriangle size={28} className="mx-auto text-amber-500 mb-2" /><p className="text-gray-600 font-bold text-sm mb-3">Ads load nahi ho paye. Internet check karein.</p><button onClick={() => setRoomsReloadKey(k => k + 1)} className="bg-brand text-white px-5 py-2.5 rounded-xl font-black text-sm active:scale-95">Retry</button></div>) : sortedRooms.length === 0 ? (<div className="text-center p-10 text-gray-500 font-bold">Koi result nahi mila.</div>) : (sortedRooms.map(room => (
               <div key={room._id} className={`bg-white rounded-3xl overflow-hidden shadow-md border ${room.isPromoted ? 'border-orange-200' : 'border-gray-50'}`}>
                 <div className="relative"><img src={getImageUrl(room.image)} className="w-full h-48 object-cover bg-gray-200" alt="Room" />{isFeatured(room) && <div className="absolute top-3 left-3 bg-orange-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1"><Star size={10} fill="currentColor" /> Featured</div>}<div className="absolute top-3 right-3 bg-white/90 px-3 py-1 rounded-full text-brand font-black">{room.price}</div></div>
                 <div className="p-4">
@@ -1072,7 +1110,7 @@ export default function MainApp() {
               <div className={`flex items-center justify-between p-3 rounded-2xl border-2 transition-colors ${wantBanner ? 'bg-purple-50 border-purple-400' : 'bg-gray-50 border-transparent'}`}><div><p className="text-sm font-black text-gray-800 flex items-center gap-1.5"><Megaphone size={16} className="text-purple-600" /> Top Banner Add-on</p><p className="text-[11px] font-bold text-gray-500">₹{sysSettings.pricing.bannerPrice || '499'} • {sysSettings.pricing.bannerDays || '7'} din top strip par (paid)</p></div><button type="button" onClick={() => setWantBanner(!wantBanner)} className={`w-12 h-7 rounded-full font-black text-[10px] transition-colors ${wantBanner ? 'bg-purple-600 text-white' : 'bg-gray-300 text-gray-500'}`}>{wantBanner ? 'ON' : 'OFF'}</button></div>
              <div className="space-y-3"><input type="text" value={postTitle} onChange={(e) => setPostTitle(e.target.value)} placeholder="Title" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm" /><div className="flex gap-3"><select value={postCategory} onChange={(e) => { setPostCategory(e.target.value); const opts = typesForCategory(e.target.value); setPostType(opts[0]); }} className="flex-1 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm">{sysSettings.categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}</select><select value={postType} onChange={(e) => setPostType(e.target.value)} className="flex-1 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm">{typesForCategory(postCategory).map(t => <option key={t} value={t}>{t}</option>)}</select></div><div className="flex gap-3"><input type="number" value={postPrice} onChange={(e) => setPostPrice(e.target.value)} placeholder="Rent (₹)/Month" className="flex-1 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><input type="number" value={postMobile} onChange={(e) => setPostMobile(e.target.value)} placeholder="Mobile No." className="flex-[1.5] p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/></div></div>
              <div><p className="text-xs font-black text-gray-500 mb-2 uppercase">Select Facilities</p><div className="flex flex-wrap gap-2">{(sysSettings.facilities || []).map(fac => (<button type="button" key={fac} onClick={() => setSelectedFacilities(prev => prev.includes(fac) ? prev.filter(f => f !== fac) : [...prev, fac])} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${selectedFacilities.includes(fac) ? 'bg-brand text-white border-brand shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>{fac}</button>))}</div></div>
-              <div className="flex gap-3 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button onClick={() => { setIsPostAdOpen(false); setIsPickingLocation(true); setView('map'); setGpsAccuracy(null); handleLiveLocation(true); }} className={`p-3 rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLng ? 'bg-green-50 text-green-600 border-green-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={16}/> {postLng ? 'Pinned!' : 'Map'}</button><button onClick={openPoiPicker} className="p-3 rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={16} /> Nearby</button></div>
+              <div className="flex gap-3 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button onClick={refreshGpsPin} disabled={isLocating} title="GPS se refresh" className="p-3 rounded-2xl font-black text-xs flex items-center justify-center border-2 bg-gray-50 text-gray-600 border-gray-200 active:scale-95 disabled:opacity-60">{isLocating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button><button onClick={() => { setIsPostAdOpen(false); setIsPickingLocation(true); setView('map'); setGpsAccuracy(null); handleLiveLocation(true); }} className={`p-3 rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLng ? 'bg-green-50 text-green-600 border-green-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={16}/> {postLng ? (gpsAccuracy ? `Pinned! ±${gpsAccuracy}m` : 'Pinned!') : 'Map'}</button><button onClick={openPoiPicker} className="p-3 rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={16} /> Nearby</button></div>
               {poiSelected.length > 0 && (<div className="flex flex-wrap gap-2 mt-2">{poiSelected.map((p, i) => (<span key={`${p.name}-${i}`} className="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1"><PoiIcon cat={p.cat} size={11} /><span>{p.name}</span><span>• {fmtDist(p.distM)}</span><button type="button" onClick={() => setPoiSelected(prev => prev.filter((_, j) => j !== i))} className="text-purple-400 font-black ml-1">✕</button></span>))}</div>)}
           </div>
           <div className="p-4 border-t bg-white sticky bottom-0 z-10">

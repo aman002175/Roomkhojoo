@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { User, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft } from 'lucide-react';
+import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (admin token)
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace('/api', '') : 'https://roomkhojo-api.onrender.com';
@@ -52,13 +53,24 @@ export default function AdminPanel() {
     if (adminChatScrollRef.current) adminChatScrollRef.current.scrollTop = adminChatScrollRef.current.scrollHeight;
   }, [chatTicketId, tickets]);
 
+  // 🔐 P1 #32: admin session expire (401) → login screen par wapas
+  useEffect(() => {
+    const onExpired = (e) => {
+      if (e.detail !== 'admin') return;
+      setIsAuthenticated(false);
+      alert('Admin session expire ho gaya. Dobara login karein.');
+    };
+    window.addEventListener('rk:auth-expired', onExpired);
+    return () => window.removeEventListener('rk:auth-expired', onExpired);
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated) return;
-    fetch(`${API_URL}/admin/all`, { headers: adminAuthHeaders() })
+    apiFetch(`${API_URL}/admin/all`, { headers: adminAuthHeaders() })
       .then(res => res.json())
       .then(data => { if (data.success) setAdminRooms(data.rooms); })
       .catch(() => { /* list refresh fail: silent */ });
-    fetch(`${ADMIN_API}/settings`)
+    apiFetch(`${ADMIN_API}/settings`)
       .then(res => res.json())
       .then(data => {
         if (data.success && data.settings) {
@@ -70,11 +82,11 @@ export default function AdminPanel() {
         }
       })
       .catch(() => { /* settings load fail: silent */ });
-    fetch(`${SUPPORT_API}/admin/all`, { headers: adminAuthHeaders() })
+    apiFetch(`${SUPPORT_API}/admin/all`, { headers: adminAuthHeaders() })
       .then(res => res.json())
       .then(data => { if (data.success) { setTickets(data.tickets || []); setOpenCount(data.openCount || 0); } })
       .catch(() => { /* tickets load fail: silent */ });
-    fetch(`${API_URL}/admin/claims`, { headers: adminAuthHeaders() })
+    apiFetch(`${API_URL}/admin/claims`, { headers: adminAuthHeaders() })
       .then(res => res.json())
       .then(data => { if (data.success) setClaims(data.rooms || []); })
       .catch(() => { /* claims load fail: silent */ });
@@ -83,7 +95,7 @@ export default function AdminPanel() {
   // 🔗 Claim request approve/reject (approve = ad claimant ke account se link)
   const handleClaim = async (id, action) => {
     try {
-      const res = await fetch(`${API_URL}/admin/claims/${id}/${action}`, { method: 'POST', headers: adminAuthHeaders() });
+      const res = await apiFetch(`${API_URL}/admin/claims/${id}/${action}`, { method: 'POST', headers: adminAuthHeaders() });
       const data = await res.json();
       if (!data.success) return alert(data.message || 'Kuch gadbad ho gayi.');
       setClaims(prev => prev.filter(c => c._id !== id));
@@ -93,7 +105,7 @@ export default function AdminPanel() {
 
   const handleLogin = async () => {
     try {
-      const res = await fetch(`${ADMIN_API}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: loginUser.trim(), password: loginPass.trim() }) });
+      const res = await apiFetch(`${ADMIN_API}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: loginUser.trim(), password: loginPass.trim() }) });
       const data = await res.json();
       if (data.success && data.token) {
         sessionStorage.setItem('roomkhojo_admin_token', data.token);
@@ -108,7 +120,7 @@ export default function AdminPanel() {
     if (!newAdminUser && !newAdminPass) return alert("New credentials daliye!");
     if (!window.confirm("WARNING: Kya aap sach mein Admin Username/Password change karna chahte hain?")) return;
     try {
-      const res = await fetch(`${ADMIN_API}/change-credentials`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ oldPassword: oldPass, newUsername: newAdminUser, newPassword: newAdminPass }) });
+      const res = await apiFetch(`${ADMIN_API}/change-credentials`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ oldPassword: oldPass, newUsername: newAdminUser, newPassword: newAdminPass }) });
       const data = await res.json(); alert(data.message);
       if(data.success) { setOldPass(''); setNewAdminUser(''); setNewAdminPass(''); if(newAdminPass) { sessionStorage.removeItem('roomkhojo_admin_token'); setIsAuthenticated(false); } }
     } catch { alert("Error."); }
@@ -119,7 +131,7 @@ export default function AdminPanel() {
     const text = (adminReply[ticketId] || '').trim();
     if (!text) return alert('Jawab likho pehle.');
     try {
-      const res = await fetch(`${SUPPORT_API}/${ticketId}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ text }) });
+      const res = await apiFetch(`${SUPPORT_API}/${ticketId}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ text }) });
       const data = await res.json();
       if (data.success) { setAdminReply(prev => ({ ...prev, [ticketId]: '' })); setRefreshKey(k => k + 1); }
       else alert(data.message);
@@ -128,7 +140,7 @@ export default function AdminPanel() {
 
   const setTicketStatus = async (ticketId, status) => {
     try {
-      const res = await fetch(`${SUPPORT_API}/admin/${ticketId}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ status }) });
+      const res = await apiFetch(`${SUPPORT_API}/admin/${ticketId}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ status }) });
       const data = await res.json();
       if (data.success) setRefreshKey(k => k + 1);
       else alert(data.message);
@@ -138,7 +150,7 @@ export default function AdminPanel() {
   // 🚨 SMART ERROR TRACKER (Ise Update Kiya Hai)
   const saveSystemSettings = async (updatedCategories, updatedFacilities, updatedPricing, updatedAdminPath, updatedAutoApprove) => {
     try {
-      const res = await fetch(`${ADMIN_API}/settings`, { 
+      const res = await apiFetch(`${ADMIN_API}/settings`, { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() },
         body: JSON.stringify({ categories: updatedCategories || sysCategories, facilities: updatedFacilities || sysFacilities, pricing: updatedPricing || sysPricing, adminPath: updatedAdminPath !== undefined ? updatedAdminPath : sysAdminPath, autoApproveFree: updatedAutoApprove !== undefined ? updatedAutoApprove : sysAutoApprove })
@@ -184,13 +196,13 @@ export default function AdminPanel() {
     setSysFacilities(updated);
   };
 
-  const handleApprove = async (id) => { try { await fetch(`${API_URL}/${id}/approve`, { method: 'PATCH', headers: adminAuthHeaders() }); setRefreshKey(k => k + 1); } catch { /* approve fail: silent */ } };
-  const handleDelete = async (id) => { if (!window.confirm("Room delete karna hai? Ye action wapas nahi hoga.")) return; try { await fetch(`${API_URL}/${id}`, { method: 'DELETE', headers: adminAuthHeaders() }); setRefreshKey(k => k + 1); } catch { /* delete fail: silent */ } };
+  const handleApprove = async (id) => { try { await apiFetch(`${API_URL}/${id}/approve`, { method: 'PATCH', headers: adminAuthHeaders() }); setRefreshKey(k => k + 1); } catch { /* approve fail: silent */ } };
+  const handleDelete = async (id) => { if (!window.confirm("Room delete karna hai? Ye action wapas nahi hoga.")) return; try { await apiFetch(`${API_URL}/${id}`, { method: 'DELETE', headers: adminAuthHeaders() }); setRefreshKey(k => k + 1); } catch { /* delete fail: silent */ } };
 
   // 🎯 Banner approve/revoke (payment verify ke baad)
   const handleBannerApprove = async (id, approve) => {
     try {
-      const res = await fetch(`${API_URL}/${id}/banner`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ approve }) });
+      const res = await apiFetch(`${API_URL}/${id}/banner`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ approve }) });
       const data = await res.json();
       alert(data.message);
       if (data.success) setRefreshKey(k => k + 1);
@@ -202,7 +214,7 @@ export default function AdminPanel() {
     if (!migrateEmail.trim()) return alert('Email daliye!');
     if (!window.confirm('Is email ke user ko saare puraane (bina-link) ads transfer kar dun?')) return;
     try {
-      const res = await fetch(`${ADMIN_API}/migrate-rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ email: migrateEmail.trim() }) });
+      const res = await apiFetch(`${ADMIN_API}/migrate-rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ email: migrateEmail.trim() }) });
       const data = await res.json();
       alert(data.message);
       if (data.success) { setMigrateEmail(''); setRefreshKey(k => k + 1); }

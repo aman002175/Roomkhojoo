@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, LogOut, Star, ArrowLeft, Settings, Bell, MapPin, Trash2, Edit3, X, Camera, ShieldAlert, Phone, Clock, Eye, Heart, RefreshCw, Link, AlertTriangle } from 'lucide-react';
+import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace('/api', '') : 'https://roomkhojo-api.onrender.com';
@@ -14,6 +15,17 @@ const authHeaders = () => {
 
 export default function UserDashboard() {
   const navigate = useNavigate();
+
+  // 🔐 P1 #32: session expire (401) → message + login page
+  useEffect(() => {
+    const onExpired = (e) => {
+      if (e.detail !== 'user') return;
+      alert('Aapka session expire ho gaya. Dobara login karein.');
+      navigate('/');
+    };
+    window.addEventListener('rk:auth-expired', onExpired);
+    return () => window.removeEventListener('rk:auth-expired', onExpired);
+  }, [navigate]);
   // Session lazy-load (refresh par login bana rehta hai)
   const [currentUser, setCurrentUser] = useState(() => {
     try { const saved = localStorage.getItem('roomkhojo_user'); return saved ? JSON.parse(saved) : null; } catch { return null; }
@@ -54,7 +66,7 @@ export default function UserDashboard() {
   const [savedRooms, setSavedRooms] = useState([]);
 
   const fetchSaved = () => {
-    fetch(`${BASE_URL}/api/users/favorites`, { headers: authHeaders() })
+    apiFetch(`${BASE_URL}/api/users/favorites`, { headers: authHeaders() })
       .then(res => res.json())
       .then(data => { if (data.success) setSavedRooms(data.rooms || []); })
       .catch(() => { /* saved optional */ });
@@ -62,7 +74,7 @@ export default function UserDashboard() {
 
   const unsaveRoom = async (roomId) => {
     try {
-      const res = await fetch(`${BASE_URL}/api/users/favorites/${roomId}/toggle`, { method: 'POST', headers: authHeaders() });
+      const res = await apiFetch(`${BASE_URL}/api/users/favorites/${roomId}/toggle`, { method: 'POST', headers: authHeaders() });
       const data = await res.json();
       if (data.success && !data.saved) setSavedRooms(savedRooms.filter(r => r._id !== roomId));
     } catch { alert('Server connection failed.'); }
@@ -70,12 +82,12 @@ export default function UserDashboard() {
 
   useEffect(() => {
     if (!currentUser) { navigate('/'); return; }
-    fetch(`${BASE_URL}/api/rooms/user/${currentUser.id}`, { headers: authHeaders() })
+    apiFetch(`${BASE_URL}/api/rooms/user/${currentUser.id}`, { headers: authHeaders() })
       .then(res => res.json())
       .then(data => { if (data.success) setMyRooms(data.rooms); })
       .catch((err) => console.error(err))
       .finally(() => setAdsLoaded(true));
-    fetch(`${BASE_URL}/api/admin/settings`)
+    apiFetch(`${BASE_URL}/api/admin/settings`)
       .then(res => res.json())
       .then(data => { if (data.success && data.settings) setSysSettings(data.settings); })
       .catch(() => { /* settings optional: defaults use honge */ });
@@ -92,7 +104,7 @@ export default function UserDashboard() {
     if (digits.length !== 10) return alert('Sahi 10-digit mobile number daliye.');
     setClaimBusy(true); setClaimSearched(false);
     try {
-      const res = await fetch(`${BASE_URL}/api/rooms/claimable?mobile=${digits}`, { headers: authHeaders() });
+      const res = await apiFetch(`${BASE_URL}/api/rooms/claimable?mobile=${digits}`, { headers: authHeaders() });
       const data = await res.json();
       if (data.success) { setClaimResults(data.rooms || []); setClaimSearched(true); }
       else alert(data.message || 'Search fail ho gaya.');
@@ -103,7 +115,7 @@ export default function UserDashboard() {
   const submitClaim = async (roomId) => {
     setClaimBusy(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/rooms/${roomId}/claim`, {
+      const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}/claim`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ mobile: claimMobile })
@@ -117,7 +129,7 @@ export default function UserDashboard() {
 
   const toggleRoomStatus = async (roomId) => {
     try {
-      const res = await fetch(`${BASE_URL}/api/rooms/${roomId}/toggle-status`, { method: 'PATCH', headers: authHeaders() });
+      const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}/toggle-status`, { method: 'PATCH', headers: authHeaders() });
       const data = await res.json();
       if (data.success) { setMyRooms(myRooms.map(room => room._id === roomId ? { ...room, isActive: data.isActive } : room)); }
     } catch { alert('Status update fail ho gaya.'); }
@@ -126,7 +138,7 @@ export default function UserDashboard() {
   const deleteRoom = async (roomId) => {
     if (!window.confirm("Kya aap sach mein is Ad ko hamesha ke liye Delete karna chahte hain?")) return;
     try {
-      const res = await fetch(`${BASE_URL}/api/rooms/${roomId}`, { method: 'DELETE', headers: authHeaders() });
+      const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}`, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
       if (data.success) { setMyRooms(myRooms.filter(room => room._id !== roomId)); alert("Ad successfully deleted!"); }
     } catch { alert('Delete fail ho gaya.'); }
@@ -159,7 +171,7 @@ export default function UserDashboard() {
       fd.append('keepImages', JSON.stringify(editKeep));
       editNew.forEach(p => fd.append('images', p.file));
 
-      const res = await fetch(`${BASE_URL}/api/rooms/${editingRoomId}/edit`, { method: 'PUT', headers: authHeaders(), body: fd });
+      const res = await apiFetch(`${BASE_URL}/api/rooms/${editingRoomId}/edit`, { method: 'PUT', headers: authHeaders(), body: fd, signal: AbortSignal.timeout(60000) }); // photos: 60s
       const data = await res.json();
       
       if(data.success) {
@@ -202,7 +214,7 @@ export default function UserDashboard() {
     if (!renewRef.trim()) return alert('UPI Ref / UTR No. daliye (payment ke baad milta hai).');
     setIsSubmitting(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/rooms/${renewRoom._id}/renew`, {
+      const res = await apiFetch(`${BASE_URL}/api/rooms/${renewRoom._id}/renew`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ promoPlan: renewPlan, paymentRef: renewRef.trim(), paymentCode: renewCode })
@@ -218,7 +230,7 @@ export default function UserDashboard() {
   const saveProfileName = async () => {
     if (!editName.trim()) return alert('Naam khaali nahi ho sakta.');
     try {
-      const res = await fetch(`${BASE_URL}/api/users/profile`, {
+      const res = await apiFetch(`${BASE_URL}/api/users/profile`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ name: editName.trim() })
@@ -236,7 +248,7 @@ export default function UserDashboard() {
   const saveNewPassword = async () => {
     if (!oldPw || !newPw) return alert('Puraana aur naya password dono daliye.');
     try {
-      const res = await fetch(`${BASE_URL}/api/users/change-password`, {
+      const res = await apiFetch(`${BASE_URL}/api/users/change-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ oldPassword: oldPw, newPassword: newPw })

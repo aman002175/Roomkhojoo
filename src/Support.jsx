@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, Send } from 'lucide-react';
+import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-api.onrender.com').replace('/api', '');
 const CATEGORIES = ['Payment Issue', 'Ad Approval', 'Account & Login', 'Report Fake Ad', 'Other'];
@@ -27,7 +28,7 @@ export default function Support() {
   }, [chatId, tickets]);
 
   const fetchTickets = () => {
-    fetch(`${API_BASE}/api/support/mine`, { headers: authHeaders() })
+    apiFetch(`${API_BASE}/api/support/mine`, { headers: authHeaders() })
       .then(res => res.json())
       .then(data => { if (data.success) setTickets(data.tickets || []); })
       .catch(() => {});
@@ -67,7 +68,7 @@ export default function Support() {
       fd.append('category', cat);
       fd.append('message', msg);
       if (file) fd.append('images', file);
-      const res = await fetch(`${API_BASE}/api/support`, { method: 'POST', headers: authHeaders(), body: fd });
+      const res = await apiFetch(`${API_BASE}/api/support`, { method: 'POST', headers: authHeaders(), body: fd, signal: AbortSignal.timeout(60000) }); // photo: 60s
       const data = await res.json();
       if (data.success) {
         if (previewUrl) { try { URL.revokeObjectURL(previewUrl); } catch { /* ignore */ } }
@@ -87,7 +88,7 @@ export default function Support() {
     const text = (replyText[ticketId] || '').trim();
     if (!text) return alert('Jawab likho pehle.');
     try {
-      const res = await fetch(`${API_BASE}/api/support/${ticketId}/reply`, {
+      const res = await apiFetch(`${API_BASE}/api/support/${ticketId}/reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ text })
