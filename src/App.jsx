@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
+import PromoPopup from './PromoPopup';
 
 // M6 fix: route-wise code splitting — pehla load chhota, baaki pages demand par
 const MainApp = lazy(() => import('./MainApp'));
@@ -70,6 +71,7 @@ export default function App() {
           </Routes>
         </Suspense>
       </Router>
+      <PromoPopup />
     </GoogleOAuthProvider>
   );
 }
