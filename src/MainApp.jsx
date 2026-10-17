@@ -175,6 +175,8 @@ export default function MainApp() {
   const markersRef = useRef([]);
   const userLocMarkerRef = useRef(null); 
   const submitLockRef = useRef(false); // 🚫 double-submit guard (duplicate ads rokne ke liye)
+  const submitAbortRef = useRef(null); // 🛑 P1 #35: cancel-able submit (AbortController)
+  const submitCanceledRef = useRef(false); // user ne khud cancel kiya? (timeout se farq)
   const geoWatchIdRef = useRef(null); // 📍 blue-dot live watch id (unmount par clearWatch — P1 #27)
 
   const [view, setView] = useState('map'); 
@@ -264,6 +266,8 @@ export default function MainApp() {
   // P1 #33: rooms load-fail par misleading "koi result nahi" nahi — error card + Retry
   const [roomsError, setRoomsError] = useState(false);
   const [roomsReloadKey, setRoomsReloadKey] = useState(0);
+  // P1 #34: offline banner + cached list (net na ho toh purane ads dikhein)
+  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && !navigator.onLine);
 
   useEffect(() => {
     setRoomsError(false);
@@ -272,6 +276,8 @@ export default function MainApp() {
       .then(data => {
         if (data.success) {
           setRooms(data.rooms);
+          // P1 #34: agle offline ke liye cache (1.5MB se bada ho toh skip)
+          try { const json = JSON.stringify(data.rooms || []); if (json.length < 1500000) localStorage.setItem('roomkhojo_rooms_cache', json); } catch { /* cache optional */ }
           // 🔗 Shared link (?room=id) se aaye ho toh popup kholo
           const rid = new URLSearchParams(window.location.search).get('room');
           if (rid) {
@@ -280,7 +286,14 @@ export default function MainApp() {
           }
         } else setRoomsError(true);
       })
-      .catch(() => { setRoomsError(true); /* P1 #33: retry button dikhega */ });
+      .catch(() => {
+        // P1 #33/#34: pehle cached list try karo (offline-friendly), warna error card
+        try {
+          const cached = JSON.parse(localStorage.getItem('roomkhojo_rooms_cache') || 'null');
+          if (Array.isArray(cached) && cached.length > 0) setRooms(cached);
+          else setRoomsError(true);
+        } catch { setRoomsError(true); }
+      });
     apiFetch(`${ADMIN_API}/settings`)
       .then(res => res.json())
       .then(data => {
@@ -291,6 +304,15 @@ export default function MainApp() {
       })
       .catch(() => { /* settings optional: defaults use honge */ });
   }, [roomsReloadKey]);
+
+  // P1 #34: online/offline events — wapas online hote hi rooms auto-refresh
+  useEffect(() => {
+    const goOnline = () => { setIsOffline(false); setRoomsReloadKey(k => k + 1); };
+    const goOffline = () => setIsOffline(true);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, []);
   const dynamicCategories = [{ id: 'all', name: 'All Rooms' }, ...sysSettings.categories.map(cat => ({ id: cat, name: cat }))];
 
   // Login/signup success par session save (token + user)
@@ -496,11 +518,24 @@ export default function MainApp() {
       if (acc > 150) { setShowLocationWarning(true); return; }
       setPostLng(pos.coords.longitude); setPostLat(pos.coords.latitude);
       updateUserMarker(pos.coords.latitude, pos.coords.longitude);
+      reverseGeocode(pos.coords.latitude, pos.coords.longitude); // P1 #25
       if (map.current) map.current.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
     }, () => {
       setIsLocating(false);
       alert('Location nahi mili — GPS/permission check karke dobara try karein.');
     }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+  };
+
+  // 📍 P1 #25: reverse geocoding — pin ke address se landmark auto-fill
+  // (sirf tab jab landmark khaali ho — user ka likha kabhi overwrite nahi)
+  const reverseGeocode = async (lat, lng) => {
+    try {
+      const res = await apiFetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16`);
+      const data = await res.json();
+      const raw = (data && (data.name || data.display_name)) || '';
+      const label = String(raw).split(',').map(s => s.trim()).filter(Boolean).slice(0, 3).join(', ');
+      if (label) setPostLandmark(prev => (prev && prev.trim() ? prev : label.slice(0, 120)));
+    } catch { /* optional: landmark khaali rahega, user khud likh sakta hai */ }
   };
 
   const handleMapSearch = async (e) => {
@@ -532,6 +567,10 @@ export default function MainApp() {
     if (submitLockRef.current) return; // 🚫 P0 fix: double-tap par 2 ads nahi
     submitLockRef.current = true;
     setIsSubmitting(true);
+    // 🛑 P1 #35: 60s timeout + Cancel — "Verifying..." kabhi indefinite nahi
+    const controller = new AbortController();
+    submitAbortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
       const fd = new FormData();
       fd.append('title', postTitle); fd.append('price', `₹${postPrice}`); fd.append('category', postCategory); fd.append('type', postType); fd.append('landmark', postLandmark); fd.append('mobile', postMobile); 
@@ -546,7 +585,7 @@ export default function MainApp() {
       postImages.forEach(p => fd.append('images', p.file));
 
       // NOTE: userId/ownerName server token se leta hai (spoof-proof).
-      const res = await apiFetch(API_URL, { method: 'POST', headers: authHeaders(), body: fd, signal: AbortSignal.timeout(60000) }); // photos upload: 60s
+      const res = await apiFetch(API_URL, { method: 'POST', headers: authHeaders(), body: fd, signal: controller.signal });
       const data = await res.json().catch(() => null);
       if(data && data.success) { 
         alert(data.message || 'Ad submitted!'); 
@@ -555,9 +594,23 @@ export default function MainApp() {
         // ⚠️ P0 fix: fail par SILENT nahi — asli reason dikhao
         alert((data && data.message) || `Ad submit nahi hua (error ${res.status}). Dobara try karein.`);
       }
-    } catch { alert("Server connection failed."); }
-    setIsSubmitting(false);
-    submitLockRef.current = false;
+    } catch (err) {
+      if (submitCanceledRef.current) alert('Submit cancel kar diya — ad publish nahi hua.');
+      else if (err && err.name === 'AbortError') alert('Submit time out ho gaya (60s). Internet check karke dobara try karein.');
+      else alert("Server connection failed.");
+    } finally {
+      clearTimeout(timeoutId);
+      submitAbortRef.current = null;
+      submitCanceledRef.current = false;
+      setIsSubmitting(false);
+      submitLockRef.current = false;
+    }
+  };
+
+  // 🛑 P1 #35: submit beech me rok do (payment window / form dono se)
+  const cancelSubmit = () => {
+    submitCanceledRef.current = true;
+    if (submitAbortRef.current) submitAbortRef.current.abort();
   };
 
   useEffect(() => {
@@ -960,6 +1013,7 @@ export default function MainApp() {
 
   return (
     <div className="h-[100dvh] w-full bg-background flex flex-col overflow-hidden relative font-sans">
+      {isOffline && (<div className="z-50 bg-amber-500 text-white text-center text-xs font-black py-1.5 px-3 shrink-0">Aap offline hain — internet check karein. Purane ads dikh rahe hain.</div>)}
       <div className="z-40 bg-white shadow-sm shrink-0">
         <header className="px-3 py-1.5 flex justify-between items-center border-b border-gray-50"><div className="flex items-center gap-2"><button onClick={() => setIsMenuOpen(true)} className="p-1.5 -ml-1 text-gray-600 active:scale-95"><Menu size={24} /></button><div className="flex flex-col"><h1 className="text-xl font-black text-gray-800 tracking-tighter leading-tight">Room<span className="text-brand">Khojo</span></h1><a href="https://aman-bishnoi-wrold.oneapp.dev/#portfolio" target="_blank" rel="noreferrer" className="text-[10px] font-bold text-gray-500 hover:opacity-80 transition-opacity leading-none mt-0.5 tracking-tight">Built with <Heart size={10} fill="currentColor" className="inline text-brand" /> by <span className="text-brand">Aman Bishnoi</span></a></div></div><button onClick={() => isLoggedIn ? navigate('/dashboard') : setAuthMode('login')} className={`w-9 h-9 border rounded-full flex items-center justify-center active:scale-95 transition-all ${isLoggedIn ? 'bg-brand text-white border-brand shadow-lg shadow-brand/30' : 'bg-gray-50 text-gray-600'}`}><User size={20} /></button></header>
         <div className="px-3 pt-2"><div className="relative flex items-center"><Search className="absolute left-3 text-gray-400" size={18} /><input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={handleMapSearch} placeholder="Enter city (e.g. Ganganagar) & Search..." className="w-full bg-gray-100 text-sm font-bold text-gray-700 rounded-2xl py-2 pl-10 pr-20 outline-none border border-transparent focus:border-brand/30 transition-colors"/><button onClick={handleMapSearch} className="absolute right-2 bg-brand text-white text-xs font-black px-3 py-1.5 rounded-xl active:scale-95 transition-transform shadow-md flex items-center gap-1">Go <Send size={13} /></button></div></div>
@@ -1088,7 +1142,7 @@ export default function MainApp() {
         )}
       </div>
 
-      {isPickingLocation ? (<div className="bg-white border-t py-3 px-6 flex justify-between items-center z-50 h-[64px] shrink-0"><button onClick={() => { if (!map.current) return; const center = map.current.getCenter(); setPostLng(center.lng); setPostLat(center.lat); setIsPickingLocation(false); setGpsAccuracy(null); setIsPostAdOpen(true); }} className="w-full bg-brand text-white py-2.5 rounded-2xl font-black shadow-lg flex justify-center items-center gap-2 active:scale-95 transition-transform"><MapPin size={20}/> Confirm Location</button></div>) : (<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={handlePostAdClick} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://aman-bishnoi-wrold.oneapp.dev/#portfolio" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by Aman Bishnoi</a></div></div>)}
+      {isPickingLocation ? (<div className="bg-white border-t py-3 px-6 flex justify-between items-center z-50 h-[64px] shrink-0"><button onClick={() => { if (!map.current) return; const center = map.current.getCenter(); setPostLng(center.lng); setPostLat(center.lat); reverseGeocode(center.lat, center.lng); setIsPickingLocation(false); setGpsAccuracy(null); setIsPostAdOpen(true); }} className="w-full bg-brand text-white py-2.5 rounded-2xl font-black shadow-lg flex justify-center items-center gap-2 active:scale-95 transition-transform"><MapPin size={20}/> Confirm Location</button></div>) : (<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={handlePostAdClick} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://aman-bishnoi-wrold.oneapp.dev/#portfolio" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by Aman Bishnoi</a></div></div>)}
 
       <div className={`fixed inset-0 z-[8000] transition-opacity duration-300 ${isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}><div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setIsMenuOpen(false)}></div><div className={`absolute top-0 left-0 bottom-0 w-[80%] max-w-sm bg-white flex flex-col transition-transform duration-300 ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}><div className="p-6 bg-brand/5 border-b"><h2 className="text-3xl font-black text-gray-800">Room<span className="text-brand">Khojo</span></h2></div><div className="p-4 space-y-2 flex-1 overflow-y-auto mt-4"><button onClick={() => { navigate('/about'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Info size={20} className="text-brand"/> About Us</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/terms'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><FileText size={20} className="text-brand"/> Terms</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/refund'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Shield size={20} className="text-brand"/> Refund Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { if (!isLoggedIn) { setIsMenuOpen(false); setAuthMode('login'); } else { navigate('/support'); setIsMenuOpen(false); } }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-brand/5 hover:bg-brand/10 font-bold text-gray-700 border border-brand/20"><div className="flex items-center gap-3"><LifeBuoy size={20} className="text-brand"/> Support</div> <ChevronRight size={18} className="text-gray-400"/></button></div></div></div>
       <div className={`fixed inset-0 z-[7500] bg-white transition-transform duration-500 ${authMode ? 'translate-y-0' : 'translate-y-full'}`}>
@@ -1114,9 +1168,10 @@ export default function MainApp() {
               {poiSelected.length > 0 && (<div className="flex flex-wrap gap-2 mt-2">{poiSelected.map((p, i) => (<span key={`${p.name}-${i}`} className="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1"><PoiIcon cat={p.cat} size={11} /><span>{p.name}</span><span>• {fmtDist(p.distM)}</span><button type="button" onClick={() => setPoiSelected(prev => prev.filter((_, j) => j !== i))} className="text-purple-400 font-black ml-1">✕</button></span>))}</div>)}
           </div>
           <div className="p-4 border-t bg-white sticky bottom-0 z-10">
-            <button onClick={initiatePayment} disabled={isSubmitting} className={`w-full py-4 rounded-2xl font-black text-lg shadow-lg flex items-center justify-center gap-2 ${adType === 'promo' ? 'bg-orange-500 text-white' : 'bg-brand text-white'}`}>
-               {getPayAmount() === '0' || getPayAmount() === '' ? 'Publish Ad (Free)' : `Pay ₹${getPayAmount()} & Publish`}
-            </button>
+             <button onClick={initiatePayment} disabled={isSubmitting} className={`w-full py-4 rounded-2xl font-black text-lg shadow-lg flex items-center justify-center gap-2 ${adType === 'promo' ? 'bg-orange-500 text-white' : 'bg-brand text-white'}`}>
+                {isSubmitting ? (<><Loader2 size={20} className="animate-spin" /> Publishing…</>) : (getPayAmount() === '0' || getPayAmount() === '' ? 'Publish Ad (Free)' : `Pay ₹${getPayAmount()} & Publish`)}
+             </button>
+             {isSubmitting && !showPaymentWindow && (<button onClick={cancelSubmit} className="w-full mt-2 text-red-600 font-black text-sm underline">Submit cancel karein</button>)}
           </div>
         </div>
       </div>
@@ -1130,7 +1185,8 @@ export default function MainApp() {
               <div className="flex items-start gap-3 bg-blue-50 text-blue-800 p-4 rounded-2xl text-left text-xs font-bold mb-6"><AlertTriangle size={24} className="shrink-0 text-blue-600 mt-0.5" /><p>Niche 'Pay via UPI App' par click karein. Aapki UPI app open hogi. <strong>Payment karne ke baad wapas yahan aakar 'I have paid' par click karna na bhoolein.</strong></p></div>
               <a href={`upi://pay?pa=${sysSettings.pricing.upiId || 'admin@ybl'}&pn=RoomKhojo&am=${getPayAmount()}&cu=INR&tn=Code: ${payCode}`} className="w-full bg-brand text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 mb-3 shadow-lg shadow-brand/30 active:scale-95 transition-transform">Pay via UPI App</a>
               <input type="text" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="UPI Ref / UTR No. (payment ke baad milta hai)" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm mb-3 border" />
-              <button onClick={() => submitAd()} disabled={isSubmitting} className="w-full bg-green-50 text-green-700 py-4 rounded-2xl font-black flex items-center justify-center border border-green-200 active:scale-95 transition-transform">{isSubmitting ? 'Verifying...' : 'I have completed the payment'}</button>
+              <button onClick={() => submitAd()} disabled={isSubmitting} className="w-full bg-green-50 text-green-700 py-4 rounded-2xl font-black flex items-center justify-center border border-green-200 active:scale-95 transition-transform">{isSubmitting ? (<><Loader2 size={18} className="animate-spin mr-2" /> Verifying… (max 60s)</>) : 'I have completed the payment'}</button>
+              {isSubmitting && (<button onClick={cancelSubmit} className="mt-2 w-full bg-red-50 text-red-600 py-3 rounded-2xl font-black text-sm border border-red-200 active:scale-95 transition-transform">Submit Rok Do (Cancel)</button>)}
               <button onClick={() => setShowPaymentWindow(false)} className="mt-4 text-sm font-bold text-gray-400 underline">Cancel</button>
             </div>
           </div>
