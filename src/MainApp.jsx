@@ -180,27 +180,35 @@ export default function MainApp() {
   const pendingActionRef = useRef(null); // P2 #36: guest ka adhoora kaam (login ke baad resume)
   const suppressPopstateRef = useRef(false); // P2 #39: apna hi back() detect na ho
   const pendingFlyToRef = useRef(null); // P2 #38: map ready hone se pehle ka fly target
+  const reportBusyRef = useRef(new Set()); // P2 #41: report double-tap guard (per-room)
   const geoWatchIdRef = useRef(null); // 📍 blue-dot live watch id (unmount par clearWatch — P1 #27)
 
   const [view, setView] = useState('map'); 
   const [selectedRoom, setSelectedRoom] = useState(null);
-  const [activeCategory, setActiveCategory] = useState('all');
-  const [activeAudience, setActiveAudience] = useState('all');
+  // P2 #40: URL se filters restore (reload/share par reset nahi hote)
+  const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const [activeCategory, setActiveCategory] = useState(() => initialParams.get('cat') || 'all');
+  const [activeAudience, setActiveAudience] = useState(() => initialParams.get('type') || 'all');
   // 🔍 Filters: price range + sort + radius
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [minPrice, setMinPrice] = useState('');
-  const [maxPrice, setMaxPrice] = useState('');
-  const [sortBy, setSortBy] = useState('new');
-  const [nearRadius, setNearRadius] = useState(0);
+  const [minPrice, setMinPrice] = useState(() => (/^\d+$/.test(initialParams.get('min') || '') ? initialParams.get('min') : ''));
+  const [maxPrice, setMaxPrice] = useState(() => (/^\d+$/.test(initialParams.get('max') || '') ? initialParams.get('max') : ''));
+  const [sortBy, setSortBy] = useState(() => (['new', 'lo', 'hi'].includes(initialParams.get('sort')) ? initialParams.get('sort') : 'new'));
+  const [nearRadius, setNearRadius] = useState(() => ([0, 2, 5, 10].includes(Number(initialParams.get('near'))) ? Number(initialParams.get('near')) : 0));
   const [userLoc, setUserLoc] = useState(null);
   // ❤️ Favorites + 🔗 Share
   const [savedIds, setSavedIds] = useState([]);
   const [shareRoom, setShareRoom] = useState(null);
+  const [isSharingCard, setIsSharingCard] = useState(false); // P2 #42: card ban raha hai (loading)
+  // P2 #41: kaunse ads report ho chuke (button "Reported" dikhe; reload par bhi yaad rahe)
+  const [reportedIds, setReportedIds] = useState(() => {
+    try { const v = JSON.parse(localStorage.getItem('roomkhojo_reported') || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+  });
   const [bannerRooms, setBannerRooms] = useState([]);
   const [bannerIndex, setBannerIndex] = useState(0);
   const [wantBanner, setWantBanner] = useState(false);
   const [rooms, setRooms] = useState([]);
-  const [searchQuery, setSearchQuery] = useState(''); 
+  const [searchQuery, setSearchQuery] = useState(() => initialParams.get('q') || ''); 
   
   const [isMenuOpen, setIsMenuOpen] = useState(false); 
   const [authMode, setAuthMode] = useState(null);
@@ -290,11 +298,11 @@ export default function MainApp() {
               setSelectedRoom(found);
               markRoomViewed(found);
               // reload ke waqt duplicate history entry na bane
-              if (!(window.history.state && window.history.state.roomPopup)) window.history.pushState({ roomPopup: true }, '', `?room=${rid}`);
+              if (!(window.history.state && window.history.state.roomPopup)) window.history.pushState({ roomPopup: true }, '', window.location.href);
               flyWhenReady(found.lng, found.lat, 16);
             } else {
               alert('Ye ad ab available nahi hai — delete ho gayi ya expire ho chuki hai.');
-              window.history.replaceState(null, '', window.location.pathname);
+              cleanRoomParam();
             }
           }
         } else setRoomsError(true);
@@ -326,7 +334,21 @@ export default function MainApp() {
     window.addEventListener('offline', goOffline);
     return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
   }, []);
-  const dynamicCategories = [{ id: 'all', name: 'All Rooms' }, ...sysSettings.categories.map(cat => ({ id: cat, name: cat }))];
+
+  // P2 #40: filter badle → URL me likho (replaceState; ?room= wala param safe rehta hai)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    ['cat', 'type', 'q', 'min', 'max', 'sort', 'near'].forEach(k => params.delete(k));
+    if (activeCategory !== 'all') params.set('cat', activeCategory);
+    if (activeAudience !== 'all') params.set('type', activeAudience);
+    if (searchQuery.trim()) params.set('q', searchQuery.trim());
+    if (minPrice !== '') params.set('min', minPrice);
+    if (maxPrice !== '') params.set('max', maxPrice);
+    if (sortBy !== 'new') params.set('sort', sortBy);
+    if (nearRadius !== 0) params.set('near', String(nearRadius));
+    const qs = params.toString();
+    window.history.replaceState(window.history.state, '', qs ? `?${qs}` : window.location.pathname);
+  }, [activeCategory, activeAudience, searchQuery, minPrice, maxPrice, sortBy, nearRadius]);
 
   // Login/signup success par session save (token + user)
   const saveSession = (token, userData) => {
@@ -666,7 +688,7 @@ export default function MainApp() {
         // apna hi history.back() tha (close button) → URL bhi saaf
         suppressPopstateRef.current = false;
         setSelectedRoom(null);
-        if (new URLSearchParams(window.location.search).get('room')) window.history.replaceState(null, '', window.location.pathname);
+        if (new URLSearchParams(window.location.search).get('room')) cleanRoomParam();
         return;
       }
       const rid = new URLSearchParams(window.location.search).get('room');
@@ -841,8 +863,11 @@ export default function MainApp() {
     setSelectedRoom(room);
     markRoomViewed(room);
     if (room && room._id) {
-      if (window.history.state && window.history.state.roomPopup) window.history.replaceState({ roomPopup: true }, '', `?room=${room._id}`);
-      else window.history.pushState({ roomPopup: true }, '', `?room=${room._id}`);
+      const p = new URLSearchParams(window.location.search);
+      p.set('room', room._id);
+      const url = `?${p.toString()}`;
+      if (window.history.state && window.history.state.roomPopup) window.history.replaceState({ roomPopup: true }, '', url);
+      else window.history.pushState({ roomPopup: true }, '', url);
     }
   };
 
@@ -1008,7 +1033,7 @@ export default function MainApp() {
     y += 46;
     ctx.fillStyle = '#0d9488';
     ctx.font = '900 32px system-ui, sans-serif';
-    ctx.fillText('roomkhojoo.vercel.app', 40, y);
+    ctx.fillText(window.location.host || 'roomkhojoo.vercel.app', 40, y);
     ctx.fillStyle = '#0d9488';
     ctx.fillRect(0, H - 110, W, 110);
     ctx.fillStyle = '#ffffff';
@@ -1022,6 +1047,8 @@ export default function MainApp() {
 
   // Card image ko native share-sheet se bhejo (WhatsApp = photo + caption)
   const shareCardImage = async (room) => {
+    if (isSharingCard) return; // P2 #42: double-tap par 2 baar card na bane
+    setIsSharingCard(true);
     try {
       const blob = await drawShareCard(room);
       const file = new File([blob], 'roomkhojo-ad.png', { type: 'image/png' });
@@ -1034,7 +1061,25 @@ export default function MainApp() {
     } catch (err) {
       if (err && err.name === 'AbortError') return; // user ne cancel kiya
       copyShareLink(room); // fallback: text+link
+    } finally {
+      setIsSharingCard(false);
     }
+  };
+
+  // P2 #42: Esc se share modal band
+  useEffect(() => {
+    if (!shareRoom) return;
+    const onKey = (e) => { if (e.key === 'Escape') setShareRoom(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [shareRoom]);
+
+  // P2 #40: sirf room param hatao — filters URL me bane rahein
+  const cleanRoomParam = () => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete('room');
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
   };
 
   // Popup band karo + history/URL sahi karo (P2 #39)
@@ -1044,18 +1089,34 @@ export default function MainApp() {
       suppressPopstateRef.current = true;
       window.history.back();
     } else if (new URLSearchParams(window.location.search).get('room')) {
-      window.history.replaceState(null, '', window.location.pathname);
+      cleanRoomParam();
     }
   };
 
+  // P2 #41: confirm + loading guard + 429 ka saaf message + "Reported" state
   const handleReportUnavailable = async (roomId) => {
+    if (!roomId || reportedIds.includes(roomId) || reportBusyRef.current.has(roomId)) return;
+    if (!window.confirm('Ye ad available nahi hai? Admin verify karke hata dega.')) return;
+    reportBusyRef.current.add(roomId);
     try {
       const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}/report-unavailable`, { method: 'PUT' });
+      const data = await res.json().catch(() => null);
       if (res.ok) {
-        alert("Thanks for reporting! Admin will verify and update it.");
+        setReportedIds(prev => {
+          const next = [...prev, roomId];
+          try { localStorage.setItem('roomkhojo_reported', JSON.stringify(next)); } catch { /* private mode */ }
+          return next;
+        });
+        alert((data && data.message) || 'Thanks! Admin verify karke update karega.');
+      } else if (res.status === 429) {
+        alert((data && data.message) || 'Aap ye report pehle hi kar chuke hain.');
+      } else {
+        alert((data && data.message) || `Report nahi hua (error ${res.status}). Dobara try karein.`);
       }
-    } catch(e) {
-      console.error(e);
+    } catch {
+      alert('Server connection failed.');
+    } finally {
+      reportBusyRef.current.delete(roomId);
     }
   };
 
@@ -1223,7 +1284,7 @@ export default function MainApp() {
                   <p className="text-sm font-bold text-gray-500 flex items-center gap-1"><MapPin size={14} className="shrink-0" /> {room.landmark || 'Hanumangarh'}</p>
                   {Array.isArray(room.landmarks) && room.landmarks.length > 0 && (<div className="mt-1 space-y-0.5">{room.landmarks.slice(0, 3).map((l, i) => (<p key={i} className="text-[11px] font-bold text-purple-700 flex items-center gap-1"><PoiIcon cat={l.cat} size={12} /><span className="truncate">{l.name} ({fmtDist(l.distM)})</span></p>))}{room.landmarks.length > 3 && (<p className="text-[10px] font-bold text-purple-500">+{room.landmarks.length - 3} aur</p>)}</div>)}
                   <div className="flex gap-2 mt-3 items-center">
-                    <button onClick={() => handleReportUnavailable(room._id)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1.5 rounded-lg font-bold border border-red-100 active:scale-95">Unavailable?</button><button onClick={() => toggleFavorite(room._id)} className="text-[10px] bg-pink-50 text-pink-600 px-2 py-1.5 rounded-lg font-bold border border-pink-100 active:scale-95 inline-flex items-center gap-1">{savedIds.includes(room._id) ? (<><Heart size={12} fill="currentColor" /> Saved</>) : (<><Heart size={12} /> Save</>)}</button><button onClick={() => setShareRoom(room)} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1.5 rounded-lg font-bold border border-blue-100 active:scale-95 inline-flex items-center gap-1"><Share2 size={12} /> Share</button>
+                    {reportedIds.includes(room._id) ? (<span className="text-[10px] bg-gray-100 text-gray-400 px-2 py-1.5 rounded-lg font-bold border border-gray-200">Reported</span>) : (<button onClick={() => handleReportUnavailable(room._id)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1.5 rounded-lg font-bold border border-red-100 active:scale-95">Unavailable?</button>)}<button onClick={() => toggleFavorite(room._id)} className="text-[10px] bg-pink-50 text-pink-600 px-2 py-1.5 rounded-lg font-bold border border-pink-100 active:scale-95 inline-flex items-center gap-1">{savedIds.includes(room._id) ? (<><Heart size={12} fill="currentColor" /> Saved</>) : (<><Heart size={12} /> Save</>)}</button><button onClick={() => setShareRoom(room)} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1.5 rounded-lg font-bold border border-blue-100 active:scale-95 inline-flex items-center gap-1"><Share2 size={12} /> Share</button>
                   </div>
                   <div className="flex gap-3 mt-3"><a href={`tel:${room.mobile}`} className="flex-1 bg-brand text-white py-2 rounded-xl font-black flex items-center justify-center gap-2 text-sm active:scale-95 transition-transform"><Phone size={16}/> Call</a><a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste! Maine RoomKhojo par aapka room "${room.title}" dekha. Kya ye abhi available hai? \n\nRoom Link: ${window.location.href}`)}`} target="_blank" rel="noreferrer" className="w-12 border-2 border-[#25D366] text-[#25D366] flex items-center justify-center rounded-xl active:scale-95 transition-transform"><MessageCircle size={18}/></a><a href={`https://www.google.com/maps/dir/?api=1&destination=${room.lat},${room.lng}`} target="_blank" rel="noreferrer" className="w-12 bg-blue-50 text-blue-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-blue-200"><Navigation size={18}/></a></div>
                 </div>
@@ -1239,7 +1300,7 @@ export default function MainApp() {
             {selectedRoom.description && (<div className="flex gap-1.5 mb-2 pt-2 border-t border-gray-50 overflow-x-auto no-scrollbar flex-nowrap">{selectedRoom.description.split(', ').map(fac => (<span key={fac} className="bg-gray-50 text-gray-600 border px-2 py-1 rounded-md text-[9px] font-bold uppercase shrink-0">{fac}</span>))}</div>)}
             {Array.isArray(selectedRoom.landmarks) && selectedRoom.landmarks.length > 0 && (<div className="bg-purple-50 border border-purple-100 rounded-xl p-2 mb-2"><p className="text-[10px] font-black text-purple-700 uppercase mb-1 flex items-center gap-1"><MapPin size={12} /> Aas-paas ki jagah</p>{selectedRoom.landmarks.map((l, i) => (<p key={i} className="text-[11px] font-bold text-gray-700 flex items-center gap-1"><PoiIcon cat={l.cat} size={12} /><span>{l.name} — <span className="text-purple-700">{fmtDist(l.distM)}</span></span></p>))}</div>)}
             <div className="flex gap-2 items-center mb-3">
-              <button onClick={() => handleReportUnavailable(selectedRoom._id)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100 active:scale-95 font-bold shrink-0">Unavailable?</button><button onClick={() => toggleFavorite(selectedRoom._id)} className="text-[10px] bg-pink-50 text-pink-600 px-2 py-1 rounded border border-pink-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1">{savedIds.includes(selectedRoom._id) ? (<><Heart size={12} fill="currentColor" /> Saved</>) : (<><Heart size={12} /> Save</>)}</button><button onClick={() => setShareRoom(selectedRoom)} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1"><Share2 size={12} /> Share</button>
+              {reportedIds.includes(selectedRoom._id) ? (<span className="text-[10px] bg-gray-100 text-gray-400 px-2 py-1 rounded border border-gray-200 font-bold shrink-0">Reported</span>) : (<button onClick={() => handleReportUnavailable(selectedRoom._id)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100 active:scale-95 font-bold shrink-0">Unavailable?</button>)}<button onClick={() => toggleFavorite(selectedRoom._id)} className="text-[10px] bg-pink-50 text-pink-600 px-2 py-1 rounded border border-pink-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1">{savedIds.includes(selectedRoom._id) ? (<><Heart size={12} fill="currentColor" /> Saved</>) : (<><Heart size={12} /> Save</>)}</button><button onClick={() => setShareRoom(selectedRoom)} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1"><Share2 size={12} /> Share</button>
             </div>
             <div className="flex gap-2"><a href={`tel:${selectedRoom.mobile}`} className="flex-1 bg-brand text-white py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Phone size={14}/> Call</a><a href={`https://wa.me/91${selectedRoom.mobile}?text=${encodeURIComponent(`Namaste! Maine RoomKhojo par aapka room "${selectedRoom.title}" dekha. Kya ye abhi available hai? \n\nRoom Link: ${window.location.href}`)}`} target="_blank" rel="noreferrer" className="flex-1 border-2 border-[#25D366] text-[#25D366] py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><MessageCircle size={14}/> WhatsApp</a><a href={`https://www.google.com/maps/dir/?api=1&destination=${selectedRoom.lat},${selectedRoom.lng}`} target="_blank" rel="noreferrer" className="flex-1 bg-blue-50 text-blue-600 border border-blue-200 py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Navigation size={14}/> Navigate</a></div>
           </div>
@@ -1299,8 +1360,8 @@ export default function MainApp() {
 
       {/* 🔗 SHARE VISITING-CARD MODAL */}
       {shareRoom && (
-        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative">
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShareRoom(null)}>
+          <div className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative" onClick={(e) => e.stopPropagation()}>
             <button onClick={() => setShareRoom(null)} className="absolute top-3 right-3 z-10 w-8 h-8 bg-black/50 text-white shadow-lg rounded-full flex items-center justify-center"><X size={18}/></button>
             <div className="relative">
               <img src={getImageUrl(roomGallery(shareRoom)[0])} className="w-full h-52 object-cover bg-gray-200" alt={shareRoom.title} />
@@ -1318,7 +1379,7 @@ export default function MainApp() {
                 <button onClick={() => copyShareLink(shareRoom)} className="text-[10px] font-black bg-blue-600 text-white px-2 py-1.5 rounded-lg shrink-0 active:scale-95 inline-flex items-center gap-1"><Copy size={12} /> Copy</button>
               </div>
               <div className="flex gap-2 mt-3">
-                <button onClick={() => shareCardImage(shareRoom)} className="flex-1 bg-purple-600 text-white py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-purple-600/30"><ImageIcon size={18} /> Card Share</button>
+                <button onClick={() => shareCardImage(shareRoom)} disabled={isSharingCard} className="flex-1 bg-purple-600 text-white py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-purple-600/30 disabled:opacity-60">{isSharingCard ? (<><Loader2 size={18} className="animate-spin" /> Card ban raha hai…</>) : (<><ImageIcon size={18} /> Card Share</>)}</button>
               </div>
               <div className="flex gap-2 mt-2">
                 <button onClick={() => shareWhatsApp(shareRoom)} className="flex-1 bg-[#25D366] text-white py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 active:scale-95"><MessageCircle size={18}/> WhatsApp</button>
