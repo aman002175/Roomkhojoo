@@ -46,13 +46,13 @@ const markRoomViewed = (room) => {
 };
 
 // 🗺️ ORIGINAL OSM Standard raster (shuru wali map — user demand par wapas).
-// maxzoom 19 (OSM ka max — usse aage overzoom, blank tiles nahi).
+// P2 #44: single host (subdomain nahi — OSM policy + HTTP/2 benefit). maxzoom 19.
 const MAP_STYLE = {
   version: 8,
   sources: {
     osm: {
       type: 'raster',
-      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
       tileSize: 256,
       attribution: '© OpenStreetMap contributors',
       maxzoom: 19
@@ -126,15 +126,11 @@ const PoiIcon = ({ cat, size = 14, className = '' }) => {
 const CAT_ICONS = { all: Home, PG: Users, Flat: Building2, Room: Home, Hostel: Hotel, Library: BookOpen, Office: Briefcase };
 const catIcon = (id) => CAT_ICONS[id] || Tag;
 
-// Overpass API (free, no key): 1.5km me coaching/hospital/bus/railway dhoondo
+// Overpass API (P2 #43: ab backend proxy se — cache + server-side timeout)
 const fetchNearbyPOI = async (lat, lng, radius = 1500) => {
-  const q = `[out:json][timeout:25];(nwr["amenity"~"^(school|college|university|training|hospital|clinic|doctors)$"](around:${radius},${lat},${lng});nwr["highway"="bus_stop"](around:${radius},${lat},${lng});nwr["amenity"="bus_station"](around:${radius},${lat},${lng});nwr["railway"~"^(station|halt)$"](around:${radius},${lat},${lng}););out center 20;`;
-  const res = await apiFetch('https://overpass.kumi.systems/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'data=' + encodeURIComponent(q)
-  });
+  const res = await apiFetch(`${BASE_URL}/api/geo/nearby?lat=${lat}&lng=${lng}&radius=${radius}`);
   const data = await res.json();
+  if (!data || !data.success) throw new Error((data && data.message) || 'Nearby fail');
   const seen = new Set();
   return (data.elements || [])
     .map((el) => {
@@ -260,11 +256,16 @@ export default function MainApp() {
   const [mapLoaded, setMapLoaded] = useState(false);
   // WebGL nahi (Brave Shields/purana browser) toh map kabhi nahi chalega — render-time check
   const [mapDead] = useState(() => (maplibregl.supported ? !maplibregl.supported() : false));
+  // P2 #44: tiles baar-baar fail → saaf banner (blank map chup-chaap nahi)
+  const [mapTilesDown, setMapTilesDown] = useState(false);
+  const tileErrCountRef = useRef(0);
   // Street / Satellite toggle
   const [mapStyle, setMapStyle] = useState('street');
 
   const switchMapStyle = (s) => {
     setMapStyle(s);
+    tileErrCountRef.current = 0; // naya source — dobara se gino
+    setMapTilesDown(false);
     if (map.current) {
       try { if (map.current) map.current.setStyle(s === 'sat' ? SAT_STYLE : MAP_STYLE); } catch { /* ignore */ }
     }
@@ -569,9 +570,9 @@ export default function MainApp() {
   // (sirf tab jab landmark khaali ho — user ka likha kabhi overwrite nahi)
   const reverseGeocode = async (lat, lng) => {
     try {
-      const res = await apiFetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16`);
+      const res = await apiFetch(`${BASE_URL}/api/geo/reverse?lat=${lat}&lng=${lng}`);
       const data = await res.json();
-      const raw = (data && (data.name || data.display_name)) || '';
+      const raw = (data && data.address) || '';
       const label = String(raw).split(',').map(s => s.trim()).filter(Boolean).slice(0, 3).join(', ');
       if (label) setPostLandmark(prev => (prev && prev.trim() ? prev : label.slice(0, 120)));
     } catch { /* optional: landmark khaali rahega, user khud likh sakta hai */ }
@@ -581,8 +582,9 @@ export default function MainApp() {
     if (e.key === 'Enter' || e.type === 'click') {
       if (!searchQuery.trim()) return;
       try {
-        const res = await apiFetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}+India`); const data = await res.json();
-        if (data && data.length > 0) { if (map.current) map.current.flyTo({ center: [parseFloat(data[0].lon), parseFloat(data[0].lat)], zoom: 13, speed: 1.5 }); } else { alert(`Nahi mila.`); }
+        const res = await apiFetch(`${BASE_URL}/api/geo/search?q=${encodeURIComponent(searchQuery.trim())}`); const data = await res.json();
+        const first = data && data.success && Array.isArray(data.results) ? data.results[0] : null;
+        if (first) { if (map.current) map.current.flyTo({ center: [first.lng, first.lat], zoom: 13, speed: 1.5 }); } else { alert(`Nahi mila.`); }
       } catch { /* search fail: user dobara try karega */ }
     }
   };
@@ -663,6 +665,13 @@ export default function MainApp() {
         pendingFlyToRef.current = null;
         try { map.current.flyTo({ center: [t.lng, t.lat], zoom: t.zoom || 16 }); } catch { /* map dead → ignore */ }
       }
+    });
+    // P2 #44: tile-load errors gino — 6 ke baad banner ("internet check / satellite try")
+    map.current.on('error', (e) => {
+      const isTileErr = !!(e && e.tile) || /tile|failed to fetch|network/i.test(String((e && e.error && e.error.message) || ''));
+      if (!isTileErr) return;
+      tileErrCountRef.current += 1;
+      if (tileErrCountRef.current >= 6) setMapTilesDown(true);
     });
     // 🧹 P1 #28: unmount (ya map dead) par poora map destroy — WebGL context/workers leak na ho
     return () => {
@@ -1257,6 +1266,7 @@ export default function MainApp() {
         })()}
         <div className={`absolute inset-0 transition-opacity duration-500 ${view === 'map' ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}><div ref={mapContainer} className="w-full h-full" /></div>
         {view === 'map' && roomsError && rooms.length === 0 && (<div className="absolute top-24 left-1/2 -translate-x-1/2 z-40 bg-white shadow-xl border border-amber-200 rounded-2xl px-4 py-2 flex items-center gap-2"><AlertTriangle size={16} className="text-amber-500 shrink-0" /><span className="text-xs font-bold text-gray-700">Ads load nahi hue.</span><button onClick={() => setRoomsReloadKey(k => k + 1)} className="text-xs font-black text-brand underline shrink-0">Retry</button></div>)}
+        {view === 'map' && mapTilesDown && !mapDead && (<div className="absolute bottom-44 left-1/2 -translate-x-1/2 z-40 bg-white shadow-xl border border-amber-200 rounded-2xl px-4 py-2 flex items-center gap-2 max-w-[92%]"><AlertTriangle size={16} className="text-amber-500 shrink-0" /><span className="text-xs font-bold text-gray-700">Map tiles load nahi ho rahe — internet check karein.</span>{mapStyle === 'street' && (<button onClick={() => switchMapStyle('sat')} className="text-xs font-black text-brand underline shrink-0">Satellite try</button>)}</div>)}
         {view === 'map' && !isPickingLocation && (<button onClick={() => handleLiveLocation(false)} disabled={isLocating} className="absolute bottom-28 right-4 z-40 bg-white p-3 rounded-full shadow-xl border border-gray-100 text-brand active:scale-90 transition-transform disabled:opacity-60 disabled:cursor-wait">{isLocating ? <Loader2 size={24} className="animate-spin" /> : <Navigation size={24} fill="currentColor"/>}</button>)}
         {view === 'map' && (<button onClick={() => switchMapStyle(mapStyle === 'street' ? 'sat' : 'street')} className="absolute left-4 bottom-28 z-40 bg-white px-3 py-2 rounded-full shadow-xl border border-gray-100 text-xs font-black text-gray-700 flex items-center gap-1.5 active:scale-90 transition-transform">{mapStyle === 'street' ? (<><Satellite size={14} /> Satellite</>) : (<><MapIcon size={14} /> Street</>)}</button>)}
         {view === 'map' && isPickingLocation && (<button onClick={() => handleLiveLocation(true)} disabled={isLocating} className="absolute bottom-[90px] right-4 z-40 bg-white px-4 py-2.5 rounded-full shadow-xl border border-gray-100 text-brand font-black text-xs flex items-center gap-2 active:scale-90 transition-transform disabled:opacity-70 disabled:cursor-wait">{isLocating ? (<><Loader2 size={16} className="animate-spin" /> Finding Your Location…</>) : (<><Navigation size={16} fill="currentColor"/> My Location</>)}</button>)}
