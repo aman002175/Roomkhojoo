@@ -127,7 +127,7 @@ export default function LegalPage({ type }) {
             RoomKhojo
           </p>
           <a
-            href="https://aman-bishnoi-wrold.oneapp.dev/#portfolio"
+            href="https://amanbishnoi.oneapp.dev"
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-1.5 text-sm font-black text-gray-500 hover:text-brand transition-colors active:scale-95"

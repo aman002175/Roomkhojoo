@@ -12,8 +12,8 @@ export const legalData = {
           <h3 className="font-bold text-gray-900 text-lg">Developed by 29 Dev's</h3>
           <p className="mt-1 text-gray-600">Is platform ko design aur develop <strong>Aman Bishnoi</strong> ne kiya hai.</p>
           <div className="flex flex-col gap-3 mt-5">
-            <a href="https://aman-bishnoi-wrold.oneapp.dev/#portfolio" target="_blank" rel="noreferrer" className="text-brand font-black flex items-center gap-2 bg-brand/5 p-3 rounded-xl active:scale-95 transition-transform">
-              <Link size={18} className="shrink-0" /> aman-bishnoi-wrold.oneapp.dev
+            <a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="text-brand font-black flex items-center gap-2 bg-brand/5 p-3 rounded-xl active:scale-95 transition-transform">
+              <Link size={18} className="shrink-0" /> amanbishnoi.oneapp.dev
             </a>
             <a href="https://www.instagram.com/29.devs" target="_blank" rel="noreferrer" className="text-pink-600 font-black flex items-center gap-2 bg-pink-50 p-3 rounded-xl active:scale-95 transition-transform">
               <Camera size={18} className="shrink-0" /> Instagram: @29.devs
