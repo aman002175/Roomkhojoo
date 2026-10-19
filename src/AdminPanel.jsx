@@ -54,6 +54,7 @@ export default function AdminPanel() {
   const [sysPricing, setSysPricing] = useState({ regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: '' });
   const [sysAutoApprove, setSysAutoApprove] = useState(false);
   const [sysAdminPath, setSysAdminPath] = useState('/admin-secret-29');
+  const [sysContactLimit, setSysContactLimit] = useState(15); // 📞 number reveal daily limit
 
   const [refreshKey, setRefreshKey] = useState(0);
   // 🎧 Support tickets
@@ -118,6 +119,7 @@ export default function AdminPanel() {
           setSysPricing(data.settings.pricing || { regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: '' });
           if (typeof data.settings.autoApproveFree === 'boolean') setSysAutoApprove(data.settings.autoApproveFree);
           if (data.settings.adminPath) setSysAdminPath(data.settings.adminPath);
+          if (Number.isInteger(data.settings.contactRevealLimit)) setSysContactLimit(data.settings.contactRevealLimit);
         }
       })
       .catch(() => { /* settings load fail: silent */ });
@@ -201,7 +203,7 @@ export default function AdminPanel() {
   };
 
   // 🚨 SMART ERROR TRACKER (Ise Update Kiya Hai)
-  const saveSystemSettings = async (updatedCategories, updatedFacilities, updatedPricing, updatedAdminPath, updatedAutoApprove) => {
+  const saveSystemSettings = async (updatedCategories, updatedFacilities, updatedPricing, updatedAdminPath, updatedAutoApprove, updatedContactLimit) => {
     // 🛡️ P2 #54: har save path par validation (central — kisi bhi caller se invalid data na jaye)
     const pathToCheck = updatedAdminPath !== undefined ? updatedAdminPath : sysAdminPath;
     const pathErr = validateAdminPath(pathToCheck);
@@ -213,7 +215,7 @@ export default function AdminPanel() {
       const res = await apiFetch(`${ADMIN_API}/settings`, { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() },
-        body: JSON.stringify({ categories: updatedCategories || sysCategories, facilities: updatedFacilities || sysFacilities, pricing: updatedPricing || sysPricing, adminPath: updatedAdminPath !== undefined ? updatedAdminPath : sysAdminPath, autoApproveFree: updatedAutoApprove !== undefined ? updatedAutoApprove : sysAutoApprove })
+        body: JSON.stringify({ categories: updatedCategories || sysCategories, facilities: updatedFacilities || sysFacilities, pricing: updatedPricing || sysPricing, adminPath: updatedAdminPath !== undefined ? updatedAdminPath : sysAdminPath, autoApproveFree: updatedAutoApprove !== undefined ? updatedAutoApprove : sysAutoApprove, contactRevealLimit: updatedContactLimit !== undefined ? updatedContactLimit : sysContactLimit })
       });
       
       const textData = await res.text(); 
@@ -659,6 +661,16 @@ export default function AdminPanel() {
                 <h3 className="font-black text-gray-800 mb-1">Free Ads Auto-Approve</h3>
                 <p className="text-[11px] font-bold text-gray-500 mb-3">ON = free/regular ads seedha live (bina review). OFF = admin verification ke baad. Paid/promo HAMESHA review mangte hain.</p>
                 <button onClick={() => { const v = !sysAutoApprove; if (window.confirm(v ? "Free ads seedha LIVE honge. Continue?" : "Free ads phir se review me jayenge. Continue?")) { setSysAutoApprove(v); saveSystemSettings(sysCategories, sysFacilities, sysPricing, sysAdminPath, v); } }} className={`w-full py-3 rounded-xl font-black text-sm active:scale-95 transition-colors ${sysAutoApprove ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{sysAutoApprove ? (<span className="inline-flex items-center gap-1"><Check size={14} strokeWidth={3} /> ON — Free ads seedha live</span>) : 'OFF — Free ads review me'}</button>
+              </div>
+
+              {/* 📞 Number reveal daily limit (per user) */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-purple-200">
+                <h3 className="font-black text-gray-800 mb-1">Number Reveal Limit (per din)</h3>
+                <p className="text-[11px] font-bold text-gray-500 mb-3">1 user 1 din me kitne owner numbers dekh sakta hai (scraping rok). Default 15.</p>
+                <div className="flex gap-2">
+                  <input type="number" min="1" max="100" value={sysContactLimit} onChange={(e) => setSysContactLimit(e.target.value)} className="flex-1 min-w-0 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
+                  <button onClick={() => { const n = parseInt(sysContactLimit, 10); if (!Number.isInteger(n) || n < 1 || n > 100) return alert('Limit 1 se 100 ke beech honi chahiye.'); setSysContactLimit(n); saveSystemSettings(sysCategories, sysFacilities, sysPricing, sysAdminPath, sysAutoApprove, n); }} className="bg-purple-600 text-white px-5 rounded-xl font-black text-sm active:scale-95">Save</button>
+                </div>
               </div>
              
              {/* UPI Card */}

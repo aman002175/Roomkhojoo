@@ -51,7 +51,7 @@ export default function UserDashboard() {
   // 🚨 EDIT STATES
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRoomId, setEditingRoomId] = useState(null);
-  const [editForm, setEditForm] = useState({ title: '', price: '', type: 'Boys', category: 'PG', landmark: '', mobile: '', description: [] });
+  const [editForm, setEditForm] = useState({ title: '', price: '', type: 'Boys', category: 'PG', landmark: '', mobile: '', description: [], googleMapUrl: '' });
   const [editKeep, setEditKeep] = useState([]); // mevcut URLs (✕ se hatao)
   const [editNew, setEditNew] = useState([]); // nayi files [{file, url}]
   // 🔄 Renew states
@@ -164,7 +164,8 @@ export default function UserDashboard() {
     
     setEditForm({
       title: room.title, price: String(room.price || '').replace('₹', ''), type: room.type, // P2 #47: number/missing price par crash nahi
-      category: room.category, landmark: room.landmark, mobile: room.mobile, description: facilities
+      category: room.category, landmark: room.landmark, mobile: room.mobile, description: facilities,
+      googleMapUrl: room.googleMapUrl || ''
     });
     setEditingRoomId(room._id);
     setEditKeep(room.images && room.images.length > 0 ? [...room.images] : (room.image ? [room.image] : []));
@@ -181,6 +182,7 @@ export default function UserDashboard() {
       fd.append('title', editForm.title); fd.append('price', `₹${editForm.price}`); fd.append('type', editForm.type);
       fd.append('category', editForm.category); fd.append('landmark', editForm.landmark); fd.append('mobile', editForm.mobile);
       fd.append('description', editForm.description.join(', '));
+      fd.append('googleMapUrl', (editForm.googleMapUrl || '').trim()); // 🗺️ optional
       fd.append('keepImages', JSON.stringify(editKeep));
       editNew.forEach(p => fd.append('images', p.file));
 
@@ -594,6 +596,7 @@ export default function UserDashboard() {
                   <div className="flex-1 min-w-0"><label className="text-xs font-bold text-gray-500 ml-1">Mobile No.</label><input type="number" value={editForm.mobile} onChange={(e) => setEditForm({...editForm, mobile: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
                 </div>
                 <div><label className="text-xs font-bold text-gray-500 ml-1">Landmark</label><input type="text" value={editForm.landmark} onChange={(e) => setEditForm({...editForm, landmark: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
+                <div><label className="text-xs font-bold text-gray-500 ml-1">Google Maps Link (optional)</label><input type="url" value={editForm.googleMapUrl || ''} onChange={(e) => setEditForm({...editForm, googleMapUrl: e.target.value})} placeholder="https://maps.app.goo.gl/..." className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
               </div>
 
               <div>

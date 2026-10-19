@@ -231,6 +231,12 @@ export default function MainApp() {
   const [postMobile, setPostMobile] = useState('');
   const [selectedFacilities, setSelectedFacilities] = useState([]); 
   const [postLandmark, setPostLandmark] = useState('');
+  const [postMapUrl, setPostMapUrl] = useState(''); // 🗺️ optional Google Maps link
+  // 📞 P1: number reveal — login gate + daily limit + revealed numbers (session)
+  const [contactGate, setContactGate] = useState(false);
+  const [revealedContacts, setRevealedContacts] = useState({});
+  const [contactUsage, setContactUsage] = useState(null);
+  const revealBusyRef = useRef(false);
   const [postImages, setPostImages] = useState([]); // [{file, url}] max 6 
   const [isCompressingPhotos, setIsCompressingPhotos] = useState(false); // P2 #37: compress ke dauran UI feedback
   const [postLng, setPostLng] = useState(null);
@@ -288,10 +294,10 @@ export default function MainApp() {
 
   // P2 #61: PromoPopup ko batao jab koi critical modal khula ho (payment/auth/form/popup)
   useEffect(() => {
-    const anyModal = Boolean(selectedRoom || authMode || isPostAdOpen || showPaymentWindow || showLocationWarning || isPickingLocation || isMenuOpen);
+    const anyModal = Boolean(selectedRoom || authMode || isPostAdOpen || showPaymentWindow || showLocationWarning || isPickingLocation || isMenuOpen || contactGate);
     window.__rkModalOpen = anyModal;
     window.dispatchEvent(new Event('rk:modal'));
-  }, [selectedRoom, authMode, isPostAdOpen, showPaymentWindow, showLocationWarning, isPickingLocation, isMenuOpen]);
+  }, [selectedRoom, authMode, isPostAdOpen, showPaymentWindow, showLocationWarning, isPickingLocation, isMenuOpen, contactGate]);
 
   // P2 #59: logout (menu drawer se) — session clear + reload se saara state reset
   const handleLogout = () => {
@@ -343,6 +349,15 @@ export default function MainApp() {
       })
       .catch(() => { /* settings optional: defaults use honge */ });
   }, [roomsReloadKey]);
+
+  // 📞 P1: logged-in user ka number-reveal usage (login par + har list refresh par)
+  useEffect(() => {
+    if (!isLoggedIn) { setContactUsage(null); setRevealedContacts({}); return; }
+    apiFetch(`${API_URL}/contact-usage`, { headers: authHeaders() })
+      .then(res => res.json())
+      .then(data => { if (data.success) setContactUsage({ used: data.used, limit: data.limit, remaining: data.remaining }); })
+      .catch(() => { /* usage optional */ });
+  }, [isLoggedIn, roomsReloadKey]);
 
   // P1 #34: online/offline events — wapas online hote hi rooms auto-refresh
   useEffect(() => {
@@ -654,6 +669,7 @@ export default function MainApp() {
       fd.append('bannerRequested', wantBanner);
       fd.append('bannerRef', payRef.trim());
       fd.append('landmarks', JSON.stringify(poiSelected));
+      fd.append('googleMapUrl', postMapUrl.trim()); // 🗺️ optional — link se location accurate hogi
       postImages.forEach(p => fd.append('images', p.file));
 
       // NOTE: userId/ownerName server token se leta hai (spoof-proof).
@@ -661,6 +677,19 @@ export default function MainApp() {
       const data = await res.json().catch(() => null);
       if(data && data.success) { 
         alert(data.message || 'Ad submitted!'); 
+        // ⚡ Instant listing: approved ad turant list/map me dikhao (site reload ka wait nahi)
+        const fresh = data.room;
+        if (fresh && fresh.isApproved && fresh.isActive) {
+          setRooms(prev => {
+            const next = prev.some(r => r._id === fresh._id) ? prev : [fresh, ...prev];
+            try { const json = JSON.stringify(next); if (json.length < 1500000) localStorage.setItem('roomkhojo_rooms_cache', json); } catch { /* cache optional */ }
+            return next;
+          });
+          if (fresh.mobile) setRevealedContacts(prev => ({ ...prev, [fresh._id]: fresh.mobile })); // apna number turant dikhe
+          setSelectedRoom(fresh);
+          flyWhenReady(fresh.lng, fresh.lat, 16);
+        }
+        setRoomsReloadKey(k => k + 1); // 🔄 background me server se sync (source of truth)
         resetPostForm(); // P2 #45: pura reset (pehle landmark/category/plan stale reh jate the)
       } else {
         // ⚠️ P0 fix: fail par SILENT nahi — asli reason dikhao
@@ -688,7 +717,7 @@ export default function MainApp() {
   // P2 #45: submit ke baad PURA form reset — landmark/category/pin/plan kuch bhi stale na rahe
   const resetPostForm = () => {
     setIsPostAdOpen(false); setShowPaymentWindow(false); setIsPickingLocation(false);
-    setPostTitle(''); setPostPrice(''); setPostMobile(''); setPostLandmark('');
+    setPostTitle(''); setPostPrice(''); setPostMobile(''); setPostLandmark(''); setPostMapUrl('');
     setSelectedFacilities([]); setPoiSelected([]);
     setPostLng(null); setPostLat(null); setGpsAccuracy(null);
     setAdType('regular'); setPromoPlan('7'); setWantBanner(false);
@@ -1188,6 +1217,43 @@ export default function MainApp() {
     }
   };
 
+  // 📞 P1: revealed number par call/whatsapp kholo
+  const doContactNav = (mobile, room, type) => {
+    const clean = String(mobile || '').replace(/\D/g, '').slice(-10);
+    if (clean.length !== 10) return alert('Number available nahi hai.');
+    if (type === 'call') { window.location.href = `tel:${clean}`; return; }
+    const text = encodeURIComponent(`Namaste! Maine RoomKhojo par aapka room "${room.title}" dekha. Kya ye abhi available hai? \n\nRoom Link: ${window.location.href}`);
+    window.location.href = `https://wa.me/91${clean}?text=${text}`;
+  };
+
+  // 📞 P1: contact click — guest ko security popup, logged-in ko number reveal (daily limit se)
+  const openContact = async (room, type) => {
+    if (!room) return;
+    if (!isLoggedIn) { setContactGate(true); return; }
+    const revealed = revealedContacts[room._id];
+    if (revealed) { doContactNav(revealed, room, type); return; }
+    if (revealBusyRef.current) return;
+    revealBusyRef.current = true;
+    try {
+      const res = await apiFetch(`${API_URL}/${room._id}/contact`, { headers: authHeaders() });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data && data.success) {
+        setRevealedContacts(prev => ({ ...prev, [room._id]: data.mobile }));
+        setContactUsage({ used: data.used, limit: data.limit, remaining: data.remaining });
+        doContactNav(data.mobile, room, type);
+      } else if (res.status === 429) {
+        if (data && data.used !== undefined) setContactUsage({ used: data.used, limit: data.limit, remaining: 0 });
+        alert((data && data.message) || 'Aaj ka number-reveal limit khatam. Kal dobara try karo.');
+      } else {
+        alert((data && data.message) || `Number reveal nahi hua (error ${res.status}).`);
+      }
+    } catch {
+      alert('Server connection failed.');
+    } finally {
+      revealBusyRef.current = false;
+    }
+  };
+
   useEffect(() => {
     if (!map.current) return;
     markersRef.current.forEach(m => m.remove()); markersRef.current = [];
@@ -1364,7 +1430,7 @@ export default function MainApp() {
                   <div className="flex gap-2 mt-3 items-center">
                     {reportedIds.includes(room._id) ? (<span className="text-[10px] bg-gray-100 text-gray-400 px-2 py-1.5 rounded-lg font-bold border border-gray-200">Reported</span>) : (<button onClick={() => handleReportUnavailable(room._id)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1.5 rounded-lg font-bold border border-red-100 active:scale-95">Unavailable?</button>)}<button onClick={() => toggleFavorite(room._id)} className="text-[10px] bg-pink-50 text-pink-600 px-2 py-1.5 rounded-lg font-bold border border-pink-100 active:scale-95 inline-flex items-center gap-1">{savedIds.includes(room._id) ? (<><Heart size={12} fill="currentColor" /> Saved</>) : (<><Heart size={12} /> Save</>)}</button><button onClick={() => setShareRoom(room)} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1.5 rounded-lg font-bold border border-blue-100 active:scale-95 inline-flex items-center gap-1"><Share2 size={12} /> Share</button>
                   </div>
-                  <div className="flex gap-3 mt-3"><a href={`tel:${room.mobile}`} className="flex-1 bg-brand text-white py-2 rounded-xl font-black flex items-center justify-center gap-2 text-sm active:scale-95 transition-transform"><Phone size={16}/> Call</a><a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste! Maine RoomKhojo par aapka room "${room.title}" dekha. Kya ye abhi available hai? \n\nRoom Link: ${window.location.href}`)}`} target="_blank" rel="noreferrer" className="w-12 border-2 border-[#25D366] text-[#25D366] flex items-center justify-center rounded-xl active:scale-95 transition-transform"><MessageCircle size={18}/></a><a href={`https://www.google.com/maps/dir/?api=1&destination=${room.lat},${room.lng}`} target="_blank" rel="noreferrer" className="w-12 bg-blue-50 text-blue-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-blue-200"><Navigation size={18}/></a></div>
+                  <div className="flex gap-3 mt-3"><button onClick={() => openContact(room, 'call')} className="flex-1 bg-brand text-white py-2 rounded-xl font-black flex items-center justify-center gap-2 text-sm active:scale-95 transition-transform"><Phone size={16}/> Call</button><button onClick={() => openContact(room, 'whatsapp')} className="w-12 border-2 border-[#25D366] text-[#25D366] flex items-center justify-center rounded-xl active:scale-95 transition-transform"><MessageCircle size={18}/></button><a href={room.googleMapUrl || `https://www.google.com/maps/dir/?api=1&destination=${room.lat},${room.lng}`} target="_blank" rel="noreferrer" className="w-12 bg-blue-50 text-blue-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-blue-200"><Navigation size={18}/></a></div>
                 </div>
               </div>
             )))}
@@ -1374,13 +1440,14 @@ export default function MainApp() {
         {selectedRoom && view === 'map' && !isPickingLocation && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-h-[42dvh] overflow-y-auto bg-white rounded-2xl shadow-2xl z-[100] p-3 border border-gray-100">
               <button onClick={closeRoomPopup} className="absolute top-2 right-2 w-8 h-8 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-600 z-10"><X size={18}/></button>
-            <div className="flex gap-3 mb-2"><div className="flex gap-2 overflow-x-auto shrink-0 max-w-[45%] no-scrollbar">{roomGallery(selectedRoom).map((u, i) => (<img key={i} src={getImageUrl(u)} className="w-16 h-16 object-cover rounded-xl bg-gray-200 shrink-0 border border-gray-100" alt={`Room ${i + 1}`} />))}</div><div className="flex-1"><div className="flex justify-between items-start pr-10"><h3 className="font-black text-gray-800 line-clamp-1">{selectedRoom.title}</h3><span className="bg-brand/10 text-brand px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-1">{selectedRoom.category}</span></div><p className="text-brand font-black text-xl leading-none mt-1">{selectedRoom.price}</p><p className="text-[11px] font-bold text-gray-500 mt-1.5 flex items-center gap-1"><User size={12}/> {selectedRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {selectedRoom.mobile}</p></div></div>
+            <div className="flex gap-3 mb-2"><div className="flex gap-2 overflow-x-auto shrink-0 max-w-[45%] no-scrollbar">{roomGallery(selectedRoom).map((u, i) => (<img key={i} src={getImageUrl(u)} className="w-16 h-16 object-cover rounded-xl bg-gray-200 shrink-0 border border-gray-100" alt={`Room ${i + 1}`} />))}</div><div className="flex-1"><div className="flex justify-between items-start pr-10"><h3 className="font-black text-gray-800 line-clamp-1">{selectedRoom.title}</h3><span className="bg-brand/10 text-brand px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-1">{selectedRoom.category}</span></div><p className="text-brand font-black text-xl leading-none mt-1">{selectedRoom.price}</p><p className="text-[11px] font-bold text-gray-500 mt-1.5 flex items-center gap-1"><User size={12}/> {selectedRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {revealedContacts[selectedRoom._id] ? `+91 ${revealedContacts[selectedRoom._id]}` : '••••• •••••'}</p></div></div>
             {selectedRoom.description && (<div className="flex gap-1.5 mb-2 pt-2 border-t border-gray-50 overflow-x-auto no-scrollbar flex-nowrap">{selectedRoom.description.split(', ').map(fac => (<span key={fac} className="bg-gray-50 text-gray-600 border px-2 py-1 rounded-md text-[9px] font-bold uppercase shrink-0">{fac}</span>))}</div>)}
             {Array.isArray(selectedRoom.landmarks) && selectedRoom.landmarks.length > 0 && (<div className="bg-purple-50 border border-purple-100 rounded-xl p-2 mb-2"><p className="text-[10px] font-black text-purple-700 uppercase mb-1 flex items-center gap-1"><MapPin size={12} /> Aas-paas ki jagah</p>{selectedRoom.landmarks.map((l, i) => (<p key={i} className="text-[11px] font-bold text-gray-700 flex items-center gap-1"><PoiIcon cat={l.cat} size={12} /><span>{l.name} — <span className="text-purple-700">{fmtDist(l.distM)}</span></span></p>))}</div>)}
             <div className="flex gap-2 items-center mb-3">
               {reportedIds.includes(selectedRoom._id) ? (<span className="text-[10px] bg-gray-100 text-gray-400 px-2 py-1 rounded border border-gray-200 font-bold shrink-0">Reported</span>) : (<button onClick={() => handleReportUnavailable(selectedRoom._id)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100 active:scale-95 font-bold shrink-0">Unavailable?</button>)}<button onClick={() => toggleFavorite(selectedRoom._id)} className="text-[10px] bg-pink-50 text-pink-600 px-2 py-1 rounded border border-pink-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1">{savedIds.includes(selectedRoom._id) ? (<><Heart size={12} fill="currentColor" /> Saved</>) : (<><Heart size={12} /> Save</>)}</button><button onClick={() => setShareRoom(selectedRoom)} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1"><Share2 size={12} /> Share</button>
             </div>
-            <div className="flex gap-2"><a href={`tel:${selectedRoom.mobile}`} className="flex-1 bg-brand text-white py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Phone size={14}/> Call</a><a href={`https://wa.me/91${selectedRoom.mobile}?text=${encodeURIComponent(`Namaste! Maine RoomKhojo par aapka room "${selectedRoom.title}" dekha. Kya ye abhi available hai? \n\nRoom Link: ${window.location.href}`)}`} target="_blank" rel="noreferrer" className="flex-1 border-2 border-[#25D366] text-[#25D366] py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><MessageCircle size={14}/> WhatsApp</a><a href={`https://www.google.com/maps/dir/?api=1&destination=${selectedRoom.lat},${selectedRoom.lng}`} target="_blank" rel="noreferrer" className="flex-1 bg-blue-50 text-blue-600 border border-blue-200 py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Navigation size={14}/> Navigate</a></div>
+            <div className="flex gap-2"><button onClick={() => openContact(selectedRoom, 'call')} className="flex-1 bg-brand text-white py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Phone size={14}/> Call</button><button onClick={() => openContact(selectedRoom, 'whatsapp')} className="flex-1 border-2 border-[#25D366] text-[#25D366] py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><MessageCircle size={14}/> WhatsApp</button><a href={selectedRoom.googleMapUrl || `https://www.google.com/maps/dir/?api=1&destination=${selectedRoom.lat},${selectedRoom.lng}`} target="_blank" rel="noreferrer" className="flex-1 bg-blue-50 text-blue-600 border border-blue-200 py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Navigation size={14}/> Navigate</a></div>
+            {isLoggedIn && contactUsage && (<p className="text-[9px] font-bold text-gray-400 text-center mt-1.5">Aaj ke number reveals: {contactUsage.used}/{contactUsage.limit}{contactUsage.remaining > 0 ? ` — ${contactUsage.remaining} baaki` : ' — limit khatam'}{!revealedContacts[selectedRoom._id] && ' • Call/WhatsApp par number dikhega'}</p>)}
           </div>
         )}
       </div>
@@ -1393,6 +1460,18 @@ export default function MainApp() {
           <div className="flex flex-col h-full p-8 justify-center relative"><button onClick={() => setAuthMode(null)} className="absolute top-8 right-8 p-2 bg-gray-100 rounded-full"><X size={24}/></button><div className="w-16 h-16 bg-brand/10 rounded-2xl flex items-center justify-center text-brand mb-6"><Lock size={32}/></div><h2 className="text-4xl font-black mb-2">{authMode === 'login' ? 'Login' : 'Signup'}</h2><p className="text-gray-500 font-bold mb-4">{authMode === 'login' ? 'Welcome back!' : 'Join to post ads.'}</p>{GOOGLE_ENABLED && (<><div className="flex items-start gap-3 bg-amber-50 text-amber-800 p-4 rounded-2xl text-xs font-bold mb-6 border border-amber-200"><AlertTriangle size={20} className="shrink-0 text-amber-600 mt-0.5" /><p><strong>Google Login is Preferred!</strong> Ek tap me login — koi password yaad rakhne ki zaroorat nahi.</p></div><div className="w-full flex justify-center mb-6"><GoogleLogin onSuccess={handleGoogleSuccess} onError={() => { alert('Google Login fail.'); }} useOneTap shape="rectangular" theme="outline" size="large" text="continue_with" width="300" /></div></>)}<div className="flex items-center gap-4 mb-6"><div className="flex-1 h-px bg-gray-200"></div><span className="text-xs font-bold text-gray-400 uppercase">OR EMAIL</span><div className="flex-1 h-px bg-gray-200"></div></div><div className="space-y-4 mb-6">{authMode === 'signup' && <input type="text" placeholder="Full Name" value={authName} onChange={(e) => setAuthName(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold" />}<input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold" /><input type="password" placeholder="Password" value={authPass} onChange={(e) => setAuthPass(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold" /></div><label className="flex items-start gap-2.5 mb-6 cursor-pointer select-none"><input type="checkbox" checked={termsOk} onChange={(e) => setTermsOk(e.target.checked)} className="mt-1 w-4 h-4 accent-emerald-600 shrink-0" /><span className="text-xs font-bold text-gray-600">Main <span onClick={(e) => { e.stopPropagation(); navigate('/terms'); }} className="text-brand underline">Terms</span> aur <span onClick={(e) => { e.stopPropagation(); navigate('/refund'); }} className="text-brand underline">Refund Policy</span> se sahmat hoon.</span></label><button onClick={handleEmailAuth} disabled={!emailReady} className={`w-full py-4 rounded-2xl font-black text-xl shadow-xl transition-all ${emailReady ? 'bg-brand text-white shadow-brand/20 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>{authMode === 'login' ? 'Email se Login Karo' : 'Email se Signup Karo'}</button><p className="text-center mt-3"><span onClick={() => { setForgotStep('email'); }} className="text-brand font-bold text-sm cursor-pointer underline">Forgot Password? OTP se reset karein</span></p>{forgotStep && (<div className="mt-4 p-4 bg-gray-50 rounded-2xl border space-y-3"><div className="flex justify-between items-center"><p className="font-black text-sm">Reset Password (OTP)</p><button onClick={() => setForgotStep(null)} className="text-gray-400 font-bold text-sm">✕</button></div>{forgotStep === 'email' && (<div className="space-y-3"><input type="email" placeholder="Registered Email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border" /><p className="text-[11px] font-bold text-gray-400">Sirf email-password wale accounts ke liye. Google login walo ko reset ki zaroorat nahi.</p><button onClick={handleForgotSend} className="w-full bg-slate-900 text-white py-3 rounded-xl font-black text-sm">Send OTP</button></div>)}{forgotStep === 'otp' && (<div className="space-y-3"><input type="text" placeholder="6-digit OTP" value={forgotOtp} onChange={(e) => setForgotOtp(e.target.value)} className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border" /><button onClick={handleForgotVerify} className="w-full bg-slate-900 text-white py-3 rounded-xl font-black text-sm">Verify OTP</button></div>)}{forgotStep === 'newpass' && (<div className="space-y-3"><input type="password" placeholder="Naya Password (min 6)" value={forgotNewPass} onChange={(e) => setForgotNewPass(e.target.value)} className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border" /><button onClick={handleForgotReset} className="w-full bg-green-600 text-white py-3 rounded-xl font-black text-sm">Set New Password</button></div>)}</div>)}<p className="text-center font-bold text-gray-500 mt-6">{authMode === 'login' ? "New here? " : "Already member? "}<span onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')} className="text-brand cursor-pointer">Click here</span></p></div>
         )}
       </div>
+
+      {contactGate && (
+        <div className="fixed inset-0 z-[8500] bg-black/60 flex items-center justify-center p-6" onClick={() => setContactGate(false)}>
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="w-14 h-14 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mb-4"><Lock size={26} /></div>
+            <h3 className="text-xl font-black text-gray-800 mb-1.5">Number Hidden</h3>
+            <p className="text-sm font-bold text-gray-500 mb-5">Security reason se owner ka number sirf logged-in users ko dikh raha hai — scrapers aur spam se bachane ke liye. Login/Signup karke Call ya WhatsApp karo.</p>
+            <button onClick={() => { setContactGate(false); setAuthMode('login'); }} className="w-full bg-brand text-white py-3.5 rounded-2xl font-black active:scale-95">Login / Signup karo</button>
+            <button onClick={() => setContactGate(false)} className="w-full mt-2 text-gray-500 font-black text-sm py-2">Abhi nahi</button>
+          </div>
+        </div>
+      )}
 
       <div className={`fixed inset-0 z-[7000] bg-black/60 overflow-hidden transition-opacity ${isPostAdOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
         <div className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-[30px] flex flex-col transition-transform duration-500 ${isPostAdOpen ? 'translate-y-0' : 'translate-y-full'}`} style={{ maxHeight: '92dvh' }}>
@@ -1408,6 +1487,10 @@ export default function MainApp() {
              <div className="space-y-3"><input type="text" value={postTitle} onChange={(e) => setPostTitle(e.target.value)} placeholder="Title" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm" /><div className="flex gap-3"><select value={postCategory} onChange={(e) => { setPostCategory(e.target.value); const opts = typesForCategory(e.target.value); setPostType(opts[0]); }} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm">{sysSettings.categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}</select><select value={postType} onChange={(e) => setPostType(e.target.value)} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm">{typesForCategory(postCategory).map(t => <option key={t} value={t}>{t}</option>)}</select></div><div className="flex gap-3"><input type="number" value={postPrice} onChange={(e) => setPostPrice(e.target.value)} placeholder="Rent (₹)/Month" className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><input type="number" value={postMobile} onChange={(e) => setPostMobile(e.target.value)} placeholder="Mobile No." className="flex-[1.5] min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/></div></div>
              <div><p className="text-xs font-black text-gray-500 mb-2 uppercase">Select Facilities</p><div className="flex flex-wrap gap-2">{(sysSettings.facilities || []).map(fac => (<button type="button" key={fac} onClick={() => setSelectedFacilities(prev => prev.includes(fac) ? prev.filter(f => f !== fac) : [...prev, fac])} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${selectedFacilities.includes(fac) ? 'bg-brand text-white border-brand shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>{fac}</button>))}</div></div>
               <div className="flex flex-wrap gap-2 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 min-w-[140px] p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button onClick={refreshGpsPin} disabled={isLocating} title="GPS se refresh" className="p-3 shrink-0 rounded-2xl font-black text-xs flex items-center justify-center border-2 bg-gray-50 text-gray-600 border-gray-200 active:scale-95 disabled:opacity-60">{isLocating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button><button onClick={() => { setIsPostAdOpen(false); setIsPickingLocation(true); setView('map'); setGpsAccuracy(null); handleLiveLocation(true); }} className={`p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLng ? 'bg-green-50 text-green-600 border-green-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={16}/> {postLng ? (gpsAccuracy ? `Pinned! ±${gpsAccuracy}m` : 'Pinned!') : 'Map'}</button><button onClick={openPoiPicker} className="p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={16} /> Nearby</button></div>
+              <div>
+                <input type="url" value={postMapUrl} onChange={(e) => setPostMapUrl(e.target.value)} placeholder="Google Maps link (optional)" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm" />
+                <p className="text-[10px] font-bold text-gray-400 mt-1 ml-1">Google Maps par apni jagah kholo → Share link → yahan paste karo. Location isi link se set hogi (zyada accurate).</p>
+              </div>
               {poiSelected.length > 0 && (<div className="flex flex-wrap gap-2 mt-2">{poiSelected.map((p, i) => (<span key={`${p.name}-${i}`} className="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1"><PoiIcon cat={p.cat} size={11} /><span>{p.name}</span><span>• {fmtDist(p.distM)}</span><button type="button" onClick={() => setPoiSelected(prev => prev.filter((_, j) => j !== i))} className="text-purple-400 font-black ml-1">✕</button></span>))}</div>)}
           </div>
           <div className="p-4 border-t bg-white sticky bottom-0 z-10">
@@ -1450,7 +1533,7 @@ export default function MainApp() {
               <div className="text-center mb-1"><h3 className="font-black text-gray-900 text-xl leading-tight">Room<span className="text-brand">Khojo</span></h3></div>
               <h4 className="font-black text-gray-800 leading-tight">{shareRoom.title}</h4>
               <p className="text-xs font-bold text-gray-500 mt-1 flex items-center gap-1"><MapPin size={12} className="shrink-0" /> {shareRoom.category} • {shareRoom.type} • {shareRoom.landmark || 'Hanumangarh'}</p>
-              <p className="text-[11px] font-bold text-gray-500 mt-1 flex items-center gap-1"><User size={12}/> {shareRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {shareRoom.mobile}</p>
+              <p className="text-[11px] font-bold text-gray-500 mt-1 flex items-center gap-1"><User size={12}/> {shareRoom.ownerName || 'Owner'}</p>
               {shareRoom.description && (<p className="text-[11px] font-bold text-gray-600 mt-2 bg-gray-50 p-2 rounded-lg border line-clamp-2">{shareRoom.description}</p>)}
               <div className="mt-2 p-2 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-between gap-2">
                 <p className="text-[10px] font-bold text-blue-700 truncate flex-1">{shareUrl(shareRoom)}</p>
