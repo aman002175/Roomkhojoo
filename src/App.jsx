@@ -160,6 +160,7 @@ export default function App() {
           {/* ── Legal Pages ── */}
           <Route path="/about" element={<LegalPage type="about" />} />
           <Route path="/terms" element={<LegalPage type="terms" />} />
+          <Route path="/privacy" element={<LegalPage type="privacy" />} />
           <Route path="/refund" element={<LegalPage type="refund" />} />
 
           {/* P2 #58: unknown URL → 404 (blank screen nahi) */}
