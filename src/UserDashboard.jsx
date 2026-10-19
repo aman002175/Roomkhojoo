@@ -16,11 +16,12 @@ const authHeaders = () => {
 export default function UserDashboard() {
   const navigate = useNavigate();
 
-  // 🔐 P1 #32: session expire (401) → message + login page
+  // 🔐 P1 #32: session expire (401) → message + login page (login modal khud khulega)
   useEffect(() => {
     const onExpired = (e) => {
       if (e.detail !== 'user') return;
       alert('Aapka session expire ho gaya. Dobara login karein.');
+      sessionStorage.setItem('roomkhojo_need_login', '1');
       navigate('/');
     };
     window.addEventListener('rk:auth-expired', onExpired);
@@ -94,7 +95,14 @@ export default function UserDashboard() {
   };
 
   useEffect(() => {
-    if (!currentUser) { navigate('/'); return; }
+    // 🔐 Token/user dono hon tabhi dashboard load — warna seedha login modal (adha-adhura session band)
+    if (!currentUser || !localStorage.getItem('roomkhojo_token')) {
+      localStorage.removeItem('roomkhojo_user');
+      localStorage.removeItem('roomkhojo_token');
+      sessionStorage.setItem('roomkhojo_need_login', '1');
+      navigate('/');
+      return;
+    }
     apiFetch(`${BASE_URL}/api/rooms/user/${currentUser.id}`, { headers: authHeaders() })
       .then(res => res.json())
       .then(data => { if (data.success) setMyRooms(data.rooms); })
