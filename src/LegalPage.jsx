@@ -461,75 +461,90 @@ export default function LegalPage({ type }) {
   };
 
   return (
-    <div className="h-[100dvh] w-full bg-gray-50 flex flex-col font-sans overflow-y-auto">
+    <div className="h-[100dvh] w-full bg-gray-50 flex flex-col font-sans">
 
-      {/* ── HEADER ── */}
-      <div className={`bg-gradient-to-br ${page.gradient} px-4 pt-12 pb-8 relative overflow-hidden`}>
-        {/* decorative blobs */}
-        <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/10 rounded-full" />
-        <div className="absolute -bottom-6 -left-6 w-28 h-28 bg-white/10 rounded-full" />
-
-        <button
-          onClick={goBack}
-          className="relative z-10 mb-6 flex items-center gap-2 text-white/80 font-bold text-sm active:scale-95 transition-transform"
-        >
-          <ArrowLeft size={20} /> {BACK_LABEL[lang]}
-        </button>
-
-        <div className={`relative z-10 w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mb-4`}>
-          {page.icon}
-        </div>
-        <h1 className="relative z-10 text-3xl font-black text-white leading-tight">
-          {content.title}
-        </h1>
-        <p className="relative z-10 text-white/70 font-bold text-sm mt-1">
-          RoomKhojo • {UPDATED_PREFIX[lang]}: {LAST_UPDATED[lang]}
-        </p>
-
-        {/* Language switcher — jaisa professional apps me hota hai */}
-        <div className="relative z-10 mt-4 inline-flex items-center gap-0.5 bg-black/15 rounded-full p-1">
-          {LANGS.map((l) => (
+      {/* ── STICKY HEADER: Back + Title + Language switch (hamesha visible) ── */}
+      <header className={`shrink-0 bg-gradient-to-r ${page.gradient} shadow-md relative z-30`}>
+        <div className="max-w-3xl mx-auto w-full px-4 md:px-6 pt-4 pb-3">
+          <div className="flex items-center gap-3">
             <button
-              key={l.id}
-              onClick={() => changeLang(l.id)}
-              className={`px-4 py-1.5 rounded-full text-xs font-black transition-all active:scale-95 ${lang === l.id ? 'bg-white text-gray-800 shadow-sm' : 'text-white/85'}`}
+              onClick={goBack}
+              aria-label={BACK_LABEL[lang]}
+              className="p-2 -ml-1 rounded-full bg-white/15 text-white active:scale-95 transition-transform shrink-0"
             >
-              {l.label}
+              <ArrowLeft size={20} />
             </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ── CONTENT ── */}
-      <div className="flex-1 px-4 py-6 space-y-4 max-w-2xl mx-auto w-full">
-        {content.sections.map((sec, i) => (
-          <div key={`${lang}-${i}`} className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
-            <h2 className="font-black text-gray-800 text-base mb-2">{sec.heading}</h2>
-            <p className="text-gray-600 font-medium text-sm leading-relaxed whitespace-pre-line">
-              {sec.body}
-            </p>
+            <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+              {page.icon}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-white font-black text-lg md:text-xl leading-tight truncate">
+                {content.title}
+              </h1>
+              <p className="text-white/75 text-[11px] md:text-xs font-bold truncate">
+                RoomKhojo • {UPDATED_PREFIX[lang]}: {LAST_UPDATED[lang]}
+              </p>
+            </div>
+            {/* Desktop/tablet: pills header ki row me */}
+            <div className="hidden sm:flex items-center gap-0.5 bg-black/20 rounded-full p-1 shrink-0">
+              {LANGS.map((l) => (
+                <button
+                  key={l.id}
+                  onClick={() => changeLang(l.id)}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-black transition-all active:scale-95 ${lang === l.id ? 'bg-white text-gray-800 shadow-sm' : 'text-white/85 hover:text-white'}`}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
           </div>
-        ))}
-      </div>
-
-      {/* ── FOOTER ── */}
-      <footer className="px-4 py-8 text-center">
-        <div className="inline-flex flex-col items-center gap-1">
-          <p className="text-gray-400 font-bold text-xs uppercase tracking-widest mb-1">
-            RoomKhojo
-          </p>
-          <a
-            href="https://amanbishnoi.oneapp.dev"
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1.5 text-sm font-black text-gray-500 hover:text-brand transition-colors active:scale-95"
-          >
-            Built with <Heart size={13} fill="currentColor" className="inline text-brand" /> by Aman Bishnoi
-            <ExternalLink size={13} className="opacity-60" />
-          </a>
-          <p className="text-gray-300 text-xs font-bold mt-1">© {new Date().getFullYear()} 29 Dev's. All rights reserved.</p>
+          {/* Mobile: full-width segmented control (title ke neeche) */}
+          <div className="sm:hidden mt-3 flex items-center gap-0.5 bg-black/20 rounded-full p-1">
+            {LANGS.map((l) => (
+              <button
+                key={l.id}
+                onClick={() => changeLang(l.id)}
+                className={`flex-1 px-3 py-1.5 rounded-full text-xs font-black transition-all active:scale-95 ${lang === l.id ? 'bg-white text-gray-800 shadow-sm' : 'text-white/85'}`}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </footer>
+      </header>
+
+      {/* ── SCROLLABLE CONTENT ── */}
+      <div className="flex-1 overflow-y-auto flex flex-col">
+        <main className="w-full max-w-3xl mx-auto px-4 md:px-6 py-5 md:py-8 flex-1">
+          <div className="space-y-3.5 md:space-y-4">
+            {content.sections.map((sec, i) => (
+              <section key={`${lang}-${i}`} className="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-200/80">
+                <h2 className="font-black text-gray-800 text-[15px] md:text-lg mb-2">{sec.heading}</h2>
+                <p className="text-gray-600 font-medium text-[13.5px] md:text-[15px] leading-relaxed whitespace-pre-line">
+                  {sec.body}
+                </p>
+              </section>
+            ))}
+          </div>
+        </main>
+
+        {/* ── FOOTER ── */}
+        <footer className="w-full max-w-3xl mx-auto px-4 md:px-6 pb-8 pt-2">
+          <div className="border-t border-gray-200 pt-5 text-center">
+            <p className="text-gray-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">RoomKhojo</p>
+            <a
+              href="https://amanbishnoi.oneapp.dev"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-black text-gray-500 hover:text-brand transition-colors active:scale-95"
+            >
+              Built with <Heart size={13} fill="currentColor" className="inline text-brand" /> by Aman Bishnoi
+              <ExternalLink size={13} className="opacity-60" />
+            </a>
+            <p className="text-gray-300 text-[11px] font-bold mt-1.5">© {new Date().getFullYear()} 29 Dev's. All rights reserved.</p>
+          </div>
+        </footer>
+      </div>
 
     </div>
   );
