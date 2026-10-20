@@ -318,7 +318,7 @@ const pages = {
           },
           {
             heading: '7. Apni Jaankari Par Aapke Adhikar',
-            body: 'Aapko poora haq hai:\n\n• Naam, photo, password — Settings se kabhi bhi badal sakte hain\n• Account delete kar sakte hain — aapki saari listings, favorites aur personal details hamesha ke liye hata di jayengi\n• Koi bhi privacy sawaal ya shikayat ho toh Support section se likhein — hum 48 ghante ke andar jawab dete hain',
+            body: 'Aapko poora haq hai:\n\n• Naam, photo, password — Settings se kabhi bhi badal sakte hain\n• Account delete kar sakte hain — aapki saari listings, favorites aur personal details hamesha ke liye hata di jayengi (safety records ke liye #9 dekhein)\n• Koi bhi privacy sawaal ya shikayat ho toh Support section se likhein — hum 48 ghante ke andar jawab dete hain',
           },
           {
             heading: '8. Baaki Zaroori Baatein',
@@ -326,7 +326,7 @@ const pages = {
           },
           {
             heading: '9. Data Retention Aur Legal Holds',
-            body: 'Account delete karne par aapki listings, favorites aur personal details hata di jayengi. Lekin kuch records — jaise number-reveal records, reports aur security logs — IT Rules 2021 ke tahat investigation ke liye 180 din tak rakhe ja sakte hain. Kanooni order/hold hone par records isse zyada samay tak bhi rakhe ja sakte hain. Ye retention sirf safety aur kanooni compliance ke liye hai.',
+            body: 'Account delete karne par aapki listings, favorites aur personal details turant hata di jayengi. Safety/kanooni records thodi der aur rehte hain — number-reveal records, band (closed) complaint/report tickets aur hashed consent proof — ye 180 din ke baad automatic delete ho jaate hain (system roz cleanup chalata hai). Kanooni order/hold hone par hi records isse zyada samay tak rakhe ja sakte hain. Hosting provider ke server logs unke apne retention period ke hisaab se hote hain.',
           },
           {
             heading: '10. Cookies Aur Local Storage',
@@ -371,7 +371,7 @@ const pages = {
           },
           {
             heading: '7. Your Rights Over Your Information',
-            body: 'You have the full right to:\n\n• Change your name, photo and password anytime from Settings\n• Delete your account — all your listings, favorites and personal details are removed permanently\n• Send any privacy question or complaint via the Support section — we reply within 48 hours',
+            body: 'You have the full right to:\n\n• Change your name, photo and password anytime from Settings\n• Delete your account — all your listings, favorites and personal details are removed permanently (see #9 for safety records)\n• Send any privacy question or complaint via the Support section — we reply within 48 hours',
           },
           {
             heading: '8. Other Important Points',
@@ -379,7 +379,7 @@ const pages = {
           },
           {
             heading: '9. Data Retention & Legal Holds',
-            body: 'On account deletion, your listings, favorites and personal details are removed. However, certain records — such as number-reveal records, reports and security logs — may be retained for up to 180 days as required under IT Rules 2021 for investigation purposes. Records may be kept longer where a legal order or hold applies. This retention is only for safety and legal compliance.',
+            body: 'On account deletion, your listings, favorites and personal details are removed immediately. Safety/legal records are kept a little longer — number-reveal records, closed complaint/report tickets and hashed consent proof — and are deleted automatically after 180 days (a daily cleanup job runs). Records may be kept longer only where a legal order or hold applies. Hosting provider server logs follow their own retention periods.',
           },
           {
             heading: '10. Cookies & Local Storage',
@@ -424,7 +424,7 @@ const pages = {
           },
           {
             heading: '7. अपनी जानकारी पर आपके अधिकार',
-            body: 'आपको पूरा हक़ है:\n\n• नाम, फ़ोटो, पासवर्ड — Settings से कभी भी बदल सकते हैं\n• अकाउंट डिलीट कर सकते हैं — आपकी सारी लिस्टिंग, फ़ेवरिट और व्यक्तिगत जानकारी हमेशा के लिए हटा दी जाएगी\n• कोई भी प्राइवेसी सवाल या शिकायत हो तो Support सेक्शन से लिखें — हम 48 घंटे के अंदर जवाब देते हैं',
+            body: 'आपको पूरा हक़ है:\n\n• नाम, फ़ोटो, पासवर्ड — Settings से कभी भी बदल सकते हैं\n• अकाउंट डिलीट कर सकते हैं — आपकी सारी लिस्टिंग, फ़ेवरिट और व्यक्तिगत जानकारी हमेशा के लिए हटा दी जाएगी (सुरक्षा रिकॉर्ड के लिए #9 देखें)\n• कोई भी प्राइवेसी सवाल या शिकायत हो तो Support सेक्शन से लिखें — हम 48 घंटे के अंदर जवाब देते हैं',
           },
           {
             heading: '8. बाकी ज़रूरी बातें',
@@ -432,7 +432,7 @@ const pages = {
           },
           {
             heading: '9. डेटा रिटेंशन और कानूनी होल्ड',
-            body: 'अकाउंट डिलीट करने पर आपकी लिस्टिंग, फ़ेवरिट और व्यक्तिगत जानकारी हटा दी जाती है। लेकिन कुछ रिकॉर्ड — जैसे नंबर-reveal रिकॉर्ड, रिपोर्ट और सुरक्षा लॉग — IT Rules 2021 के तहत जाँच के लिए 180 दिन तक रखे जा सकते हैं। कानूनी आदेश/होल्ड होने पर रिकॉर्ड इससे अधिक समय तक भी रखे जा सकते हैं। यह रिटेंशन केवल सुरक्षा और कानूनी अनुपालन के लिए है।',
+            body: 'अकाउंट डिलीट करने पर आपकी लिस्टिंग, फ़ेवरिट और व्यक्तिगत जानकारी तुरंत हटा दी जाती है। सुरक्षा/कानूनी रिकॉर्ड थोड़ी देर और रहते हैं — नंबर-reveal रिकॉर्ड, बंद (closed) शिकायत/रिपोर्ट टिकट और hashed consent proof — ये 180 दिन बाद अपने आप डिलीट हो जाते हैं (सिस्टम रोज़ cleanup चलाता है)। कानूनी आदेश/होल्ड होने पर ही रिकॉर्ड इससे अधिक समय तक रखे जा सकते हैं। होस्टिंग प्रोवाइडर के सर्वर लॉग उनकी अपनी retention अवधि के अनुसार होते हैं।',
           },
           {
             heading: '10. कुकीज़ और लोकल स्टोरेज',
