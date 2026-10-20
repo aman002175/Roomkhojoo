@@ -446,7 +446,7 @@ export default function MainApp() {
       const res = await apiFetch(`${BASE_URL}/api/users/google`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: credentialResponse.credential })
+        body: JSON.stringify({ idToken: credentialResponse.credential, acceptedTerms: termsOk === true })
       });
       // Hotfix: non-JSON/empty response par "connection failed" ka jhootha message nahi — asli status dikhao
       let data = {};
@@ -468,8 +468,8 @@ export default function MainApp() {
     try {
       const endpoint = authMode === 'signup' ? 'signup' : 'login';
       const body = authMode === 'signup'
-        ? { name: authName.trim(), email: authEmail.trim(), password: authPass }
-        : { email: authEmail.trim(), password: authPass };
+        ? { name: authName.trim(), email: authEmail.trim(), password: authPass, acceptedTerms: true }
+        : { email: authEmail.trim(), password: authPass, acceptedTerms: true };
       const res = await apiFetch(`${BASE_URL}/api/users/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
