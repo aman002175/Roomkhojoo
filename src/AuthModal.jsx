@@ -24,11 +24,13 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(null);
   const hintTimer = useRef(null);
+  const termsRef = useRef(null);
 
   const flashHint = () => {
     setHint(true);
     clearTimeout(hintTimer.current);
     hintTimer.current = setTimeout(() => setHint(false), 2200);
+    termsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
   useEffect(() => () => clearTimeout(hintTimer.current), []);
@@ -183,26 +185,6 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
             </div>
           )}
 
-          <label
-            className={`mt-4 flex items-start gap-2.5 rounded-xl border p-2.5 transition-colors ${hint ? 'rk-shake border-rose-300 bg-rose-50' : 'border-transparent'}`}
-          >
-            <input
-              type="checkbox"
-              checked={terms}
-              onChange={(e) => { setTerms(e.target.checked); if (e.target.checked) setHint(false); }}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600"
-            />
-            <span className="text-[11px] font-semibold leading-relaxed text-gray-500">
-              Main{' '}
-              <button type="button" onClick={legal('/terms')} className="font-bold text-brand underline decoration-brand/30 underline-offset-2">Terms</button>,{' '}
-              <button type="button" onClick={legal('/privacy')} className="font-bold text-brand underline decoration-brand/30 underline-offset-2">Privacy Policy</button>{' '}
-              aur{' '}
-              <button type="button" onClick={legal('/refund')} className="font-bold text-brand underline decoration-brand/30 underline-offset-2">Refund Policy</button>{' '}
-              se sahmat hoon.
-            </span>
-          </label>
-          {hint && <p className="mt-1.5 px-1 text-[11px] font-bold text-rose-600">Aage badhne ke liye pehle checkbox tick karein.</p>}
-
           {GOOGLE_ENABLED && (
             <>
               <div className="relative mt-4 flex justify-center">
@@ -285,6 +267,27 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
                 </button>
               </div>
             )}
+
+            <label
+              ref={termsRef}
+              className={`flex items-start gap-2.5 rounded-xl border p-2.5 transition-colors ${hint ? 'rk-shake border-rose-300 bg-rose-50' : 'border-transparent'}`}
+            >
+              <input
+                type="checkbox"
+                checked={terms}
+                onChange={(e) => { setTerms(e.target.checked); if (e.target.checked) setHint(false); }}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600"
+              />
+              <span className="text-[11px] font-semibold leading-relaxed text-gray-500">
+                Main{' '}
+                <button type="button" onClick={legal('/terms')} className="font-bold text-brand underline decoration-brand/30 underline-offset-2">Terms</button>,{' '}
+                <button type="button" onClick={legal('/privacy')} className="font-bold text-brand underline decoration-brand/30 underline-offset-2">Privacy Policy</button>{' '}
+                aur{' '}
+                <button type="button" onClick={legal('/refund')} className="font-bold text-brand underline decoration-brand/30 underline-offset-2">Refund Policy</button>{' '}
+                se sahmat hoon.
+              </span>
+            </label>
+            {hint && <p className="-mt-1 px-1 text-[11px] font-bold text-rose-600">Sign in se pehle checkbox tick karein.</p>}
 
             <button
               type="submit"
