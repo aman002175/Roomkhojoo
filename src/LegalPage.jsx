@@ -141,7 +141,7 @@ const pages = {
           },
           {
             heading: '10. Operator Aur Paid Services',
-            body: 'RoomKhojo ko Aman Bishnoi (brand: 29 Devs) operate karte hain. Paid features (Promoted Ad / Listing Fees) ke liye jo price aur duration app me payment se pehle dikhti hai, wahi laagu hoti hai. Payment confirm hone aur ad admin verification ke baad hi service activate hoti hai (aam taur par 24-48 ghante). Agar platform ki galti se ad activate na ho ya bina policy violation ke reject ho jaye, toh poora amount 5-7 working days me wapas milta hai. Duplicate payment bhi refund hota hai. Hum GST-registered nahi hain, isliye GST invoice jari nahi hota — request par payment reference/receipt di ja sakti hai.',
+            body: 'RoomKhojo ko 29 Dev\'s operate karte hain. Paid features (Promoted Ad / Listing Fees) ke liye jo price aur duration app me payment se pehle dikhti hai, wahi laagu hoti hai. Payment confirm hone aur ad admin verification ke baad hi service activate hoti hai (aam taur par 24-48 ghante). Agar platform ki galti se ad activate na ho ya bina policy violation ke reject ho jaye, toh poora amount 5-7 working days me wapas milta hai. Duplicate payment bhi refund hota hai. Hum GST-registered nahi hain, isliye GST invoice jari nahi hota — request par payment reference/receipt di ja sakti hai.',
           },
           {
             heading: '11. Content Aur Copyright',
@@ -149,11 +149,11 @@ const pages = {
           },
           {
             heading: '12. Indemnity Aur Liability Cap',
-            body: 'Aap RoomKhojo, 29 Devs aur Aman Bishnoi ko un sab claims, losses, legal fees aur damages se protect (indemnify) karte hain jo aapke ad, aapke content, aapke misuse (jaise number resale/spam) ya in terms ke violation se kisi third party ko hone wale nuksaan se aate hain. Kanoon jahan tak allow karta hai, RoomKhojo ki total liability kisi bhi claim ke liye us amount tak limited hai jo aapne claim se pehle 6 mahine me RoomKhojo ko pay ki hai (kam se kam ₹1,000). Indirect ya consequential nuksaan ke liye koi zimmedari nahi. Jo liability kanoon se limit nahi ho sakti, wo laagu rahegi.',
+            body: 'Aap RoomKhojo, 29 Dev\'s ko un sab claims, losses, legal fees aur damages se protect (indemnify) karte hain jo aapke ad, aapke content, aapke misuse (jaise number resale/spam) ya in terms ke violation se kisi third party ko hone wale nuksaan se aate hain. Kanoon jahan tak allow karta hai, RoomKhojo ki total liability kisi bhi claim ke liye us amount tak limited hai jo aapne claim se pehle 6 mahine me RoomKhojo ko pay ki hai (kam se kam ₹1,000). Indirect ya consequential nuksaan ke liye koi zimmedari nahi. Jo liability kanoon se limit nahi ho sakti, wo laagu rahegi.',
           },
           {
             heading: '13. Grievance Officer Aur Contact',
-            body: 'Grievance Officer: Aman Bishnoi (29 Devs). Email: 29devs@proton.me · Phone: +91 91458 91108 · Address: 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Har shikayat ka acknowledgment 24 ghante ke andar aur resolution 15 din ke andar. Court/police ke valid order par content 36 ghante ke andar takedown hoga. Hum kanoon ke hisaab se investigating agencies ke saath cooperate karte hain.',
+            body: 'Grievance Officer: 29 Dev\'s. Email: 29devs@proton.me · Phone: +91 91458 91108 · Address: 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Har shikayat ka acknowledgment 24 ghante ke andar aur resolution 15 din ke andar. Court/police ke valid order par content 36 ghante ke andar takedown hoga. Hum kanoon ke hisaab se investigating agencies ke saath cooperate karte hain.',
           },
           {
             heading: '14. General',
@@ -202,7 +202,7 @@ const pages = {
           },
           {
             heading: '10. Operator & Paid Services',
-            body: 'RoomKhojo is operated by Aman Bishnoi (brand: 29 Devs). For paid features (Promoted Ad / Listing Fees), the price and duration shown in the app before payment apply. The service activates only after payment confirmation and admin verification (usually 24-48 hours). If the ad is not activated due to a platform error, or is rejected without a policy violation, the full amount is refunded within 5-7 working days. Duplicate payments are also refunded. We are not GST-registered, so GST invoices are not issued — a payment reference/receipt can be provided on request.',
+            body: 'RoomKhojo is operated by 29 Dev\'s. For paid features (Promoted Ad / Listing Fees), the price and duration shown in the app before payment apply. The service activates only after payment confirmation and admin verification (usually 24-48 hours). If the ad is not activated due to a platform error, or is rejected without a policy violation, the full amount is refunded within 5-7 working days. Duplicate payments are also refunded. We are not GST-registered, so GST invoices are not issued — a payment reference/receipt can be provided on request.',
           },
           {
             heading: '11. Content & Copyright',
@@ -210,11 +210,11 @@ const pages = {
           },
           {
             heading: '12. Indemnity & Liability Cap',
-            body: 'You indemnify RoomKhojo, 29 Devs and Aman Bishnoi against all claims, losses, legal fees and damages arising from your ad, your content, your misuse (such as number resale/spam) or your violation of these terms. To the maximum extent permitted by law, RoomKhojo total liability for any claim is limited to the amount you paid to RoomKhojo in the 6 months preceding the claim (minimum ₹1,000). There is no liability for indirect or consequential loss. Liability that cannot be limited by law remains applicable.',
+            body: 'You indemnify RoomKhojo and 29 Dev\'s against all claims, losses, legal fees and damages arising from your ad, your content, your misuse (such as number resale/spam) or your violation of these terms. To the maximum extent permitted by law, RoomKhojo total liability for any claim is limited to the amount you paid to RoomKhojo in the 6 months preceding the claim (minimum ₹1,000). There is no liability for indirect or consequential loss. Liability that cannot be limited by law remains applicable.',
           },
           {
             heading: '13. Grievance Officer & Contact',
-            body: 'Grievance Officer: Aman Bishnoi (29 Devs). Email: 29devs@proton.me · Phone: +91 91458 91108 · Address: 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Every complaint is acknowledged within 24 hours and resolved within 15 days. Content will be taken down within 36 hours on a valid court/police order. We cooperate with investigating agencies as required by law.',
+            body: 'Grievance Officer: 29 Dev\'s. Email: 29devs@proton.me · Phone: +91 91458 91108 · Address: 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Every complaint is acknowledged within 24 hours and resolved within 15 days. Content will be taken down within 36 hours on a valid court/police order. We cooperate with investigating agencies as required by law.',
           },
           {
             heading: '14. General',
@@ -263,7 +263,7 @@ const pages = {
           },
           {
             heading: '10. ऑपरेटर और सशुल्क सेवाएँ',
-            body: 'RoomKhojo को Aman Bishnoi (ब्रांड: 29 Devs) संचालित करते हैं। सशुल्क सुविधाओं (Promoted Ad / Listing Fees) के लिए भुगतान से पहले ऐप में दिखाई गई कीमत और अवधि ही लागू होती है। भुगतान की पुष्टि और एडमिन सत्यापन के बाद ही सेवा एक्टिवेट होती है (आम तौर पर 24-48 घंटे)। यदि प्लेटफ़ॉर्म की गड़बड़ी से विज्ञापन एक्टिवेट न हो, या नीति-उल्लंघन के बिना अस्वीकृत हो जाए, तो पूरी राशि 5-7 कार्यदिवसों में वापस की जाती है। दोहरा भुगतान भी रिफ़ंड होता है। हम GST-पंजीकृत नहीं हैं, इसलिए GST इनवॉइस जारी नहीं होता — अनुरोध पर भुगतान संदर्भ/रसीद दी जा सकती है।',
+            body: 'RoomKhojo को 29 Dev\'s संचालित करते हैं। सशुल्क सुविधाओं (Promoted Ad / Listing Fees) के लिए भुगतान से पहले ऐप में दिखाई गई कीमत और अवधि ही लागू होती है। भुगतान की पुष्टि और एडमिन सत्यापन के बाद ही सेवा एक्टिवेट होती है (आम तौर पर 24-48 घंटे)। यदि प्लेटफ़ॉर्म की गड़बड़ी से विज्ञापन एक्टिवेट न हो, या नीति-उल्लंघन के बिना अस्वीकृत हो जाए, तो पूरी राशि 5-7 कार्यदिवसों में वापस की जाती है। दोहरा भुगतान भी रिफ़ंड होता है। हम GST-पंजीकृत नहीं हैं, इसलिए GST इनवॉइस जारी नहीं होता — अनुरोध पर भुगतान संदर्भ/रसीद दी जा सकती है।',
           },
           {
             heading: '11. सामग्री और कॉपीराइट',
@@ -271,11 +271,11 @@ const pages = {
           },
           {
             heading: '12. क्षतिपूर्ति और दायित्व सीमा',
-            body: 'आप अपने विज्ञापन, अपनी सामग्री, अपने दुरुपयोग (जैसे नंबर रीसेल/स्पैम) या इन नियमों के उल्लंघन से उत्पन्न होने वाले सभी दावों, नुकसान, कानूनी शुल्क और हर्जाने से RoomKhojo, 29 Devs और Aman Bishnoi को क्षतिपूर्ति (indemnify) करते हैं। कानून जहाँ तक अनुमति देता है, किसी भी दावे के लिए RoomKhojo का कुल दायित्व उस राशि तक सीमित है जो आपने दावे से पहले 6 महीनों में RoomKhojo को भुगतान की है (न्यूनतम ₹1,000)। अप्रत्यक्ष या परिणामी नुकसान के लिए कोई दायित्व नहीं। जो दायित्व कानून से सीमित नहीं किया जा सकता, वह लागू रहेगा।',
+            body: 'आप अपने विज्ञापन, अपनी सामग्री, अपने दुरुपयोग (जैसे नंबर रीसेल/स्पैम) या इन नियमों के उल्लंघन से उत्पन्न होने वाले सभी दावों, नुकसान, कानूनी शुल्क और हर्जाने से RoomKhojo और 29 Dev\'s को क्षतिपूर्ति (indemnify) करते हैं। कानून जहाँ तक अनुमति देता है, किसी भी दावे के लिए RoomKhojo का कुल दायित्व उस राशि तक सीमित है जो आपने दावे से पहले 6 महीनों में RoomKhojo को भुगतान की है (न्यूनतम ₹1,000)। अप्रत्यक्ष या परिणामी नुकसान के लिए कोई दायित्व नहीं। जो दायित्व कानून से सीमित नहीं किया जा सकता, वह लागू रहेगा।',
           },
           {
             heading: '13. ग्रीवांस अधिकारी और संपर्क',
-            body: 'ग्रीवांस अधिकारी: Aman Bishnoi (29 Devs)। ईमेल: 29devs@proton.me · फ़ोन: +91 91458 91108 · पता: 6 BPM, Dabla, Block Raisinghangar, ज़िला गंगानगर, PO 12 NRD, राजस्थान 335039। हर शिकायत की पुष्टि 24 घंटे के अंदर और समाधान 15 दिनों के अंदर किया जाता है। अदालत/पुलिस के वैध आदेश पर सामग्री 36 घंटे के अंदर हटाई जाएगी। हम कानून के अनुसार जाँच एजेंसियों के साथ सहयोग करते हैं।',
+            body: 'ग्रीवांस अधिकारी: 29 Dev\'s। ईमेल: 29devs@proton.me · फ़ोन: +91 91458 91108 · पता: 6 BPM, Dabla, Block Raisinghangar, ज़िला गंगानगर, PO 12 NRD, राजस्थान 335039। हर शिकायत की पुष्टि 24 घंटे के अंदर और समाधान 15 दिनों के अंदर किया जाता है। अदालत/पुलिस के वैध आदेश पर सामग्री 36 घंटे के अंदर हटाई जाएगी। हम कानून के अनुसार जाँच एजेंसियों के साथ सहयोग करते हैं।',
           },
           {
             heading: '14. सामान्य',
@@ -338,7 +338,7 @@ const pages = {
           },
           {
             heading: '12. International Processing Aur Grievance',
-            body: 'Aapka data cloud providers (hosting, database, image hosting) ke through process ho sakta hai jo India ke bahar servers use karte hain — contractual safeguards ke saath. Grievance Officer: Aman Bishnoi (29 Devs), 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Acknowledgment 24 ghante, resolution 15 din.',
+            body: 'Aapka data cloud providers (hosting, database, image hosting) ke through process ho sakta hai jo India ke bahar servers use karte hain — contractual safeguards ke saath. Grievance Officer: 29 Dev\'s, 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Acknowledgment 24 ghante, resolution 15 din.',
           },
         ],
       },
@@ -391,7 +391,7 @@ const pages = {
           },
           {
             heading: '12. International Processing & Grievance',
-            body: 'Your data may be processed by cloud providers (hosting, database, image hosting) that use servers outside India, under contractual safeguards. Grievance Officer: Aman Bishnoi (29 Devs), 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Acknowledgment within 24 hours, resolution within 15 days.',
+            body: 'Your data may be processed by cloud providers (hosting, database, image hosting) that use servers outside India, under contractual safeguards. Grievance Officer: 29 Dev\'s, 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Acknowledgment within 24 hours, resolution within 15 days.',
           },
         ],
       },
@@ -444,7 +444,7 @@ const pages = {
           },
           {
             heading: '12. अंतर्राष्ट्रीय प्रोसेसिंग और ग्रीवांस',
-            body: 'आपका डेटा क्लाउड प्रोवाइडर्स (होस्टिंग, डेटाबेस, इमेज होस्टिंग) के माध्यम से भारत के बाहर के सर्वर पर प्रोसेस हो सकता है — कॉन्ट्रैक्टुअल सुरक्षा उपायों के साथ। ग्रीवांस अधिकारी: Aman Bishnoi (29 Devs), 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, ज़िला गंगानगर, PO 12 NRD, राजस्थान 335039। पुष्टि 24 घंटे में, समाधान 15 दिनों में।',
+            body: 'आपका डेटा क्लाउड प्रोवाइडर्स (होस्टिंग, डेटाबेस, इमेज होस्टिंग) के माध्यम से भारत के बाहर के सर्वर पर प्रोसेस हो सकता है — कॉन्ट्रैक्टुअल सुरक्षा उपायों के साथ। ग्रीवांस अधिकारी: 29 Dev\'s, 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, ज़िला गंगानगर, PO 12 NRD, राजस्थान 335039। पुष्टि 24 घंटे में, समाधान 15 दिनों में।',
           },
         ],
       },
@@ -674,7 +674,7 @@ export default function LegalPage({ type }) {
               <p className="text-[10px] md:text-[11px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
                 {CONTACT_LABEL[lang]}
               </p>
-              <p className="text-sm font-black text-gray-700">RoomKhojo — Aman Bishnoi (29 Dev's)</p>
+              <p className="text-sm font-black text-gray-700">RoomKhojo — 29 Dev's</p>
               <p className="text-xs font-bold text-gray-500 mt-1">
                 <a href="mailto:29devs@proton.me" className="text-brand underline break-all">29devs@proton.me</a>
                 <span className="mx-1.5">·</span>
@@ -696,7 +696,7 @@ export default function LegalPage({ type }) {
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 text-sm font-black text-gray-500 hover:text-brand transition-colors active:scale-95"
             >
-              Built with <Heart size={13} fill="currentColor" className="inline text-brand" /> by Aman Bishnoi
+              Built with <Heart size={13} fill="currentColor" className="inline text-brand" /> by 29 Dev's
               <ExternalLink size={13} className="opacity-60" />
             </a>
             <p className="text-gray-300 text-[11px] font-bold mt-1.5">© {new Date().getFullYear()} 29 Dev's. All rights reserved.</p>

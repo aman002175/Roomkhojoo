@@ -10,7 +10,7 @@ export const legalData = {
         <p>Mera maqsad room dhoondhne ke is thaka dene wale process ko ekdum transparent aur digital banana hai.</p>
         <div className="mt-4 pt-4 border-t border-gray-200">
           <h3 className="font-bold text-gray-900 text-lg">Developed by 29 Dev's</h3>
-          <p className="mt-1 text-gray-600">Is platform ko design aur develop <strong>Aman Bishnoi</strong> ne kiya hai.</p>
+          <p className="mt-1 text-gray-600">Is platform ko design aur develop <strong>29 Dev's</strong> ne kiya hai.</p>
           <div className="flex flex-col gap-3 mt-5">
             <a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="text-brand font-black flex items-center gap-2 bg-brand/5 p-3 rounded-xl active:scale-95 transition-transform">
               <Link size={18} className="shrink-0" /> amanbishnoi.oneapp.dev
