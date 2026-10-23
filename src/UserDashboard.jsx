@@ -273,7 +273,7 @@ export default function UserDashboard() {
 
   const saveNewPassword = async () => {
     if (!oldPw || !newPw) return alert('Puraana aur naya password dono daliye.');
-    if (newPw.length < 6) return alert('Naya password kam se kam 6 characters ka ho.'); // P2 #48: client validation
+    if (newPw.length < 8) return alert('Naya password kam se kam 8 characters ka ho.'); // P2 #48: client validation
     if (newPw === oldPw) return alert('Naya password purane se alag rakho.');
     if (savingPw) return;
     setSavingPw(true);
@@ -544,7 +544,7 @@ export default function UserDashboard() {
               </div>
               <div>
                 <p className="text-xs font-black text-gray-500 mb-2 uppercase">Password Badlo</p>
-                <div className="space-y-2"><input type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} placeholder="Puraana password" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="Naya password (min 6)" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveNewPassword} disabled={savingPw} className="w-full bg-blue-600 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingPw ? 'Update ho raha hai…' : 'Update Password'}</button></div>
+                <div className="space-y-2"><input type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} placeholder="Puraana password" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="Naya password (min 8)" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveNewPassword} disabled={savingPw} className="w-full bg-blue-600 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingPw ? 'Update ho raha hai…' : 'Update Password'}</button></div>
                 <p className="text-[11px] font-bold text-gray-400 mt-2">Google se login karte ho? Toh password hai hi nahi — seedha logout/login karo.</p>
               </div>
               {/* 📧 P2 #48: Email change — password confirm zaroori */}

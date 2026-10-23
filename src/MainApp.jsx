@@ -209,6 +209,13 @@ export default function MainApp() {
   
   const [isMenuOpen, setIsMenuOpen] = useState(false); 
   const [authMode, setAuthMode] = useState(null);
+  const [toast, setToast] = useState('');
+  const toastTimer = useRef(null);
+  const showToast = (msg) => {
+    setToast(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(''), 3200);
+  };
   
   // Refresh par login bana rahe (session localStorage me hai)
   // 🔐 Session ek hi jagahse validate: token + user dono chahiye, aur token expire ho chuka ho
@@ -1386,8 +1393,18 @@ export default function MainApp() {
         mode={authMode || 'login'}
         onClose={() => setAuthMode(null)}
         onModeChange={setAuthMode}
-        onAuthed={saveSession}
+        onAuthed={(token, user, kind) => {
+          saveSession(token, user);
+          const first = String((user && user.name) || '').trim().split(' ')[0];
+          showToast(kind === 'signup' ? `Account ban gaya${first ? `, ${first}` : ''}!` : `Welcome back${first ? `, ${first}` : ''}!`);
+        }}
       />
+      {toast && (
+        <div className="fixed bottom-24 left-1/2 z-[9000] flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-bold text-white shadow-xl rk-fade-in">
+          <Check size={16} className="text-emerald-400" />
+          {toast}
+        </div>
+      )}
 
       {contactGate && (
         <div className="fixed inset-0 z-[8500] bg-black/60 flex items-center justify-center p-6" onClick={() => setContactGate(false)}>

@@ -91,7 +91,7 @@ export default function ForgotPassword() {
 
   const resetPassword = async () => {
     setError('');
-    if (pass.length < 6) return setError('Password kam se kam 6 characters ka ho.');
+    if (pass.length < 8) return setError('Password kam se kam 8 characters ka ho.');
     if (pass !== confirm) return setError('Dono passwords match nahi kar rahe.');
     setBusy(true);
     try {
@@ -252,7 +252,7 @@ export default function ForgotPassword() {
                   icon={KeyRound}
                   type={showPass ? 'text' : 'password'}
                   autoComplete="new-password"
-                  placeholder="Min 6 characters"
+                  placeholder="Min 8 characters"
                   value={pass}
                   onChange={(e) => setPass(e.target.value)}
                   disabled={busy}

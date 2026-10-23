@@ -25,6 +25,10 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
   const [busy, setBusy] = useState(null);
   const hintTimer = useRef(null);
   const termsRef = useRef(null);
+  const dialogRef = useRef(null);
+  const prevFocusRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const flashHint = () => {
     setHint(true);
@@ -51,14 +55,44 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
 
   useEffect(() => {
     if (!open) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    prevFocusRef.current = document.activeElement;
+    const t = setTimeout(() => {
+      dialogRef.current?.querySelector('input[type="text"], input[type="email"]')?.focus();
+    }, 60);
+    const onKey = (e) => {
+      if (e.key === 'Escape') { onCloseRef.current && onCloseRef.current(); return; }
+      if (e.key !== 'Tab') return;
+      const nodes = Array.from(dialogRef.current?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])
+        .filter((el) => el.offsetParent !== null);
+      if (nodes.length === 0) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('keydown', onKey);
+      const prev = prevFocusRef.current;
+      if (prev && typeof prev.focus === 'function') setTimeout(() => prev.focus(), 0);
+    };
+  }, [open]);
 
   if (!open) return null;
 
   const copy = COPY[mode] || COPY.login;
+  const pwStrength = pass
+    ? (pass.length >= 8 ? 1 : 0)
+      + (/[a-z]/.test(pass) && /[A-Z]/.test(pass) ? 1 : 0)
+      + (/\d/.test(pass) ? 1 : 0)
+      + (/[^A-Za-z0-9]/.test(pass) ? 1 : 0)
+    : 0;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -66,7 +100,7 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
     if (mode === 'signup' && name.trim().length < 2) return setError('Poora naam likhein.');
     if (!email.trim().includes('@')) return setError('Sahi email address dalein.');
     if (!pass) return setError('Password dalein.');
-    if (mode === 'signup' && pass.length < 6) return setError('Password kam se kam 6 characters ka ho.');
+    if (mode === 'signup' && pass.length < 8) return setError('Password kam se kam 8 characters ka ho.');
     setBusy('email');
     setError('');
     try {
@@ -82,7 +116,7 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
       let data = {};
       try { data = await res.json(); } catch { data = {}; }
       if (data.success) {
-        onAuthed && onAuthed(data.token, data.user);
+        onAuthed && onAuthed(data.token, data.user, mode);
         onClose && onClose();
       } else {
         setError(data.message || `Request fail hui (server ${res.status}). Dobara try karein.`);
@@ -107,7 +141,7 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
       let data = {};
       try { data = await res.json(); } catch { data = {}; }
       if (data.success) {
-        onAuthed && onAuthed(data.token, data.user);
+        onAuthed && onAuthed(data.token, data.user, mode);
         onClose && onClose();
       } else {
         setError(data.message || `Google sign-in fail hua (server ${res.status}).`);
@@ -130,6 +164,7 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
     <div className="fixed inset-0 z-[8000] flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]" onClick={onClose} />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={copy.title}
@@ -185,41 +220,6 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
             </div>
           )}
 
-          {GOOGLE_ENABLED && (
-            <>
-              <div className="relative mt-4 flex justify-center">
-                <GoogleLogin
-                  onSuccess={googleSuccess}
-                  onError={() => setError('Google sign-in fail hua. Dobara try karein.')}
-                  useOneTap
-                  shape="rectangular"
-                  theme="outline"
-                  size="large"
-                  text="continue_with"
-                  width="320"
-                />
-                {!terms && (
-                  <button
-                    type="button"
-                    aria-label="Google se pehle terms checkbox tick karein"
-                    onClick={flashHint}
-                    className="absolute inset-0 z-10 cursor-not-allowed rounded-lg"
-                  />
-                )}
-                {busy === 'google' && (
-                  <div className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/80">
-                    <Loader2 size={18} className="animate-spin text-brand" />
-                  </div>
-                )}
-              </div>
-              <div className="my-4 flex items-center gap-3">
-                <div className="h-px flex-1 bg-gray-200" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">or use email</span>
-                <div className="h-px flex-1 bg-gray-200" />
-              </div>
-            </>
-          )}
-
           <form onSubmit={submit} className="space-y-3.5">
             {mode === 'signup' && (
               <AuthField
@@ -242,19 +242,34 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={Boolean(busy)}
-              autoFocus
             />
             <AuthField
               label="Password"
               icon={Lock}
               type={showPass ? 'text' : 'password'}
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-              placeholder={mode === 'signup' ? 'Min 6 characters' : 'Aapka password'}
+              placeholder={mode === 'signup' ? 'Min 8 characters' : 'Aapka password'}
               value={pass}
               onChange={(e) => setPass(e.target.value)}
               disabled={Boolean(busy)}
               right={<PasswordToggle show={showPass} onToggle={() => setShowPass((s) => !s)} />}
             />
+
+            {mode === 'signup' && pass.length > 0 && (
+              <div className="px-1">
+                <div className="flex gap-1">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      className={`h-1 flex-1 rounded-full transition-colors ${pwStrength > i ? (pwStrength <= 2 ? 'bg-amber-400' : 'bg-emerald-500') : 'bg-gray-200'}`}
+                    />
+                  ))}
+                </div>
+                <p className={`mt-1 text-[11px] font-bold ${pwStrength <= 2 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                  {pwStrength <= 2 ? 'Weak — 8+ characters, number/symbol use karein' : 'Strong password'}
+                </p>
+              </div>
+            )}
 
             {mode === 'login' && (
               <div className="flex justify-end">
@@ -298,6 +313,41 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
               {busy === 'email' ? 'Please wait…' : copy.cta}
             </button>
           </form>
+
+          {GOOGLE_ENABLED && (
+            <>
+              <div className="my-4 flex items-center gap-3">
+                <div className="h-px flex-1 bg-gray-200" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">or continue with Google</span>
+                <div className="h-px flex-1 bg-gray-200" />
+              </div>
+              <div className="relative flex justify-center">
+                <GoogleLogin
+                  onSuccess={googleSuccess}
+                  onError={() => setError('Google sign-in fail hua. Dobara try karein.')}
+                  useOneTap
+                  shape="rectangular"
+                  theme="outline"
+                  size="large"
+                  text="continue_with"
+                  width="320"
+                />
+                {!terms && (
+                  <button
+                    type="button"
+                    aria-label="Google se pehle terms checkbox tick karein"
+                    onClick={flashHint}
+                    className="absolute inset-0 z-10 cursor-not-allowed rounded-lg"
+                  />
+                )}
+                {busy === 'google' && (
+                  <div className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/80">
+                    <Loader2 size={18} className="animate-spin text-brand" />
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           <p className="mt-4 text-center text-[11px] font-semibold leading-relaxed text-gray-400">
             {mode === 'login' ? 'Naya account chahiye? ' : 'Pehle se account hai? '}
