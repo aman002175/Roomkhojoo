@@ -4,8 +4,8 @@ import { jwtDecode } from 'jwt-decode';
 import * as maplibregl from 'maplibre-gl'; // v6 ESM-only: namespace import (default import hata)
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { X, Phone, MessageCircle, Map as MapIcon, List, Plus, Camera, Target, Info, FileText, Shield, ChevronRight, Menu, User, MapPin, Lock, Search, Navigation, Loader2, AlertTriangle, Heart, Share2, Megaphone, Landmark, TrainFront, Bus, Hospital, Stethoscope, GraduationCap, School, BookOpen, Star, Satellite, Ruler, RefreshCw, Send, Copy, Home, Users, Building2, Briefcase, Hotel, Check, Tag, Image as ImageIcon, LifeBuoy, LogOut } from 'lucide-react';
-import { GoogleLogin } from '@react-oauth/google';
 import { markerIcon, ICON_STAR } from './markerIcons';
+import AuthModal from './AuthModal';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (sab calls)
 
 // Effective-featured: promo + expiry valid ho tabhi orange STAR,
@@ -16,7 +16,6 @@ const isFeatured = (room) => room
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-api.onrender.com'; // P2 #58: sirf trailing /api strip
-const GOOGLE_ENABLED = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID); // P2 #58: clientId na ho toh Google button hide
 const API_URL = `${BASE_URL}/api/rooms`;
 const ADMIN_API = `${BASE_URL}/api/admin`; 
 const getImageUrl = (path) => !path ? 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=400&q=80' : path.startsWith('http') ? path : `${BASE_URL}${path}`;
@@ -258,26 +257,7 @@ export default function MainApp() {
   const [postLng, setPostLng] = useState(null);
   const [postLat, setPostLat] = useState(null); 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [authName, setAuthName] = useState('');
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPass, setAuthPass] = useState('');
-  // Terms & Refund Policy checkbox (login/signup ke liye mandatory)
-  const [termsOk, setTermsOk] = useState(false);
-  // Terms untick hone par checkbox halka shake + blink ho (user ko saaf dikhe kya karna hai)
-  const [termsHint, setTermsHint] = useState(false);
-  const termsHintTimer = useRef(null);
-  const flashTermsHint = () => {
-    setTermsHint(true);
-    clearTimeout(termsHintTimer.current);
-    termsHintTimer.current = setTimeout(() => setTermsHint(false), 2200);
-  };
   const [payRef, setPayRef] = useState('');
-  // Forgot-password (OTP) states
-  const [forgotStep, setForgotStep] = useState(null);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotOtp, setForgotOtp] = useState('');
-  const [forgotNewPass, setForgotNewPass] = useState('');
-  const [forgotResetToken, setForgotResetToken] = useState('');
   // 📍 POI picker states
   const [poiOpen, setPoiOpen] = useState(false);
   const [poiLoading, setPoiLoading] = useState(false);
@@ -438,92 +418,6 @@ export default function MainApp() {
       setAuthMode('login');
     }
   }, []);
-
-  // Google idToken backend par verify hota hai (C7 fix — client-parsing nahi)
-  const handleGoogleSuccess = async (credentialResponse) => {
-    if (!termsOk) return flashTermsHint();
-    try {
-      const res = await apiFetch(`${BASE_URL}/api/users/google`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: credentialResponse.credential, acceptedTerms: termsOk === true })
-      });
-      // Hotfix: non-JSON/empty response par "connection failed" ka jhootha message nahi — asli status dikhao
-      let data = {};
-      try { data = await res.json(); } catch { data = {}; }
-      if (data.success) { saveSession(data.token, data.user); alert(`Namaste ${data.user.name}!`); }
-      else alert(data.message || `Google Login fail (server ${res.status}). Dobara try karo.`);
-    } catch { alert('Server se connection nahi bana. Internet check karke dobara try karo.'); }
-  };
-
-  // Email/password real API flow (pehle fake tha — C7 fix)
-  const handleEmailAuth = async () => {
-    if (!termsOk) return flashTermsHint();
-    // Hotfix: khali/adhure fields par server round-trip hi nahi (autofill wale confusing 400 band)
-    if (authMode === 'signup') {
-      if (authName.trim().length < 2 || !authEmail.trim().includes('@') || authPass.length < 6) return alert('Naam, valid email aur password (min 6) sahi bharo.');
-    } else if (!authEmail.trim().includes('@') || !authPass) {
-      return alert('Valid email aur password dono bharo.');
-    }
-    try {
-      const endpoint = authMode === 'signup' ? 'signup' : 'login';
-      const body = authMode === 'signup'
-        ? { name: authName.trim(), email: authEmail.trim(), password: authPass, acceptedTerms: true }
-        : { email: authEmail.trim(), password: authPass, acceptedTerms: true };
-      const res = await apiFetch(`${BASE_URL}/api/users/${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      let data = {};
-      try { data = await res.json(); } catch { data = {}; }
-      if (data.success) { saveSession(data.token, data.user); alert(`Namaste ${data.user.name}!`); }
-      else alert(data.message || `Login fail (server ${res.status}). Dobara try karo.`);
-    } catch { alert('Server se connection nahi bana. Internet check karke dobara try karo.'); }
-  };
-
-  // Hotfix: email button sirf tab enable jab fields sach me bhare hon (do "Continue" wale buttons ka confusion + khali 400s band)
-  const emailReady = termsOk && authEmail.trim().includes('@') && authPass.length > 0 && (authMode !== 'signup' || (authName.trim().length > 1 && authPass.length >= 6));
-
-  // Forgot password — OTP flow (R1-R4)
-  const handleForgotSend = async () => {
-    try {
-      const res = await apiFetch(`${BASE_URL}/api/users/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail.trim() })
-      });
-      const data = await res.json();
-      alert(data.message);
-      if (data.success) setForgotStep('otp');
-    } catch { alert('Server connection failed.'); }
-  };
-
-  const handleForgotVerify = async () => {
-    try {
-      const res = await apiFetch(`${BASE_URL}/api/users/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail.trim(), otp: forgotOtp.trim() })
-      });
-      const data = await res.json();
-      if (data.success) { setForgotResetToken(data.resetToken); setForgotStep('newpass'); }
-      else alert(data.message);
-    } catch { alert('Server connection failed.'); }
-  };
-
-  const handleForgotReset = async () => {
-    try {
-      const res = await apiFetch(`${BASE_URL}/api/users/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail.trim(), resetToken: forgotResetToken, newPassword: forgotNewPass })
-      });
-      const data = await res.json();
-      alert(data.message);
-      if (data.success) { setForgotStep(null); setForgotEmail(''); setForgotOtp(''); setForgotNewPass(''); setForgotResetToken(''); }
-    } catch { alert('Server connection failed.'); }
-  };
 
   // 💰 Dual-range slider logic (0–20000, ends = no limit)
   const PRICE_CAP = 20000;
@@ -1487,11 +1381,13 @@ export default function MainApp() {
       {isPickingLocation ? (<div className="bg-white border-t py-3 px-6 flex justify-between items-center z-50 h-[64px] shrink-0"><button onClick={() => { if (!map.current) return; const center = map.current.getCenter(); setPostLng(center.lng); setPostLat(center.lat); reverseGeocode(center.lat, center.lng); setIsPickingLocation(false); setGpsAccuracy(null); setIsPostAdOpen(true); }} className="w-full bg-brand text-white py-2.5 rounded-2xl font-black shadow-lg flex justify-center items-center gap-2 active:scale-95 transition-transform"><MapPin size={20}/> Confirm Location</button></div>) : (<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={handlePostAdClick} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/privacy')} className="hover:text-brand transition-colors">Privacy</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by Aman Bishnoi</a></div></div>)}
 
       <div className={`fixed inset-0 z-[8000] transition-opacity duration-300 ${isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}><div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setIsMenuOpen(false)}></div><div className={`absolute top-0 left-0 bottom-0 w-[80%] max-w-sm bg-white flex flex-col transition-transform duration-300 ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}><div className="p-6 bg-brand/5 border-b"><h2 className="text-3xl font-black text-gray-800">Room<span className="text-brand">Khojo</span></h2></div><div className="p-4 space-y-2 flex-1 overflow-y-auto mt-4">{isLoggedIn && (<button onClick={() => { navigate('/dashboard'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><User size={20} className="text-brand"/> My Ads / Dashboard</div> <ChevronRight size={18} className="text-gray-400"/></button>)}{isLoggedIn && (<button onClick={handleLogout} className="w-full flex items-center justify-between p-4 rounded-2xl bg-red-50 hover:bg-red-100 font-bold text-red-600"><div className="flex items-center gap-3"><LogOut size={20}/> Logout</div> <ChevronRight size={18} className="text-red-300"/></button>)}{/* P2 #59: logout ab menu me bhi (dashboard settings ke saath) */}<button onClick={() => { navigate('/about'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Info size={20} className="text-brand"/> About Us</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/terms'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><FileText size={20} className="text-brand"/> Terms</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/privacy'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Lock size={20} className="text-brand"/> Privacy Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/refund'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Shield size={20} className="text-brand"/> Refund Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { if (!isLoggedIn) { setIsMenuOpen(false); setAuthMode('login'); } else { navigate('/support'); setIsMenuOpen(false); } }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-brand/5 hover:bg-brand/10 font-bold text-gray-700 border border-brand/20"><div className="flex items-center gap-3"><LifeBuoy size={20} className="text-brand"/> Support</div> <ChevronRight size={18} className="text-gray-400"/></button></div></div></div>
-      <div className={`fixed inset-0 z-[7500] bg-white transition-transform duration-500 ${authMode ? 'translate-y-0' : 'translate-y-full'}`}>
-        {authMode && (
-          <div className="flex flex-col h-full p-8 justify-center relative"><button onClick={() => setAuthMode(null)} className="absolute top-8 right-8 p-2 bg-gray-100 rounded-full"><X size={24}/></button><div className="w-16 h-16 bg-brand/10 rounded-2xl flex items-center justify-center text-brand mb-6"><Lock size={32}/></div><h2 className="text-4xl font-black mb-2">{authMode === 'login' ? 'Login' : 'Signup'}</h2><p className="text-gray-500 font-bold mb-4">{authMode === 'login' ? 'Welcome back!' : 'Join to post ads.'}</p><div className="mb-4"><label className={`flex items-start gap-2.5 cursor-pointer select-none p-2 -m-2 rounded-xl border transition-colors ${termsHint ? 'rk-shake bg-amber-50 border-amber-300' : 'border-transparent'}`}><input type="checkbox" checked={termsOk} onChange={(e) => setTermsOk(e.target.checked)} className="mt-1 w-4 h-4 accent-emerald-600 shrink-0" /><span className="text-xs font-bold text-gray-600">Main <span onClick={(e) => { e.stopPropagation(); navigate('/terms'); }} className="text-brand underline">Terms</span>, <span onClick={(e) => { e.stopPropagation(); navigate('/privacy'); }} className="text-brand underline">Privacy</span> aur <span onClick={(e) => { e.stopPropagation(); navigate('/refund'); }} className="text-brand underline">Refund Policy</span> se sahmat hoon.</span></label>{termsHint && (<p className="text-[11px] font-bold text-amber-700 mt-1.5">Pehle ye checkbox tick karo — tabhi aage badh sakte ho.</p>)}</div>{GOOGLE_ENABLED && (<><div className="flex items-start gap-3 bg-amber-50 text-amber-800 p-4 rounded-2xl text-xs font-bold mb-6 border border-amber-200"><AlertTriangle size={20} className="shrink-0 text-amber-600 mt-0.5" /><p><strong>Google Login is Preferred!</strong> Ek tap me login — koi password yaad rakhne ki zaroorat nahi.</p></div><div className="relative w-full flex justify-center mb-6"><GoogleLogin onSuccess={handleGoogleSuccess} onError={() => { alert('Google Login fail.'); }} useOneTap shape="rectangular" theme="outline" size="large" text="continue_with" width="300" />{!termsOk && (<div className="absolute inset-0 z-10 cursor-not-allowed" onClick={() => flashTermsHint()} />)}</div></>)}<div className="flex items-center gap-4 mb-6"><div className="flex-1 h-px bg-gray-200"></div><span className="text-xs font-bold text-gray-400 uppercase">OR EMAIL</span><div className="flex-1 h-px bg-gray-200"></div></div><div className="space-y-4 mb-6">{authMode === 'signup' && <input type="text" placeholder="Full Name" value={authName} onChange={(e) => setAuthName(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold" />}<input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold" /><input type="password" placeholder="Password" value={authPass} onChange={(e) => setAuthPass(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold" /></div><button onClick={handleEmailAuth} className={`w-full py-4 rounded-2xl font-black text-xl shadow-xl transition-all ${emailReady ? 'bg-brand text-white shadow-brand/20 active:scale-95' : 'bg-gray-200 text-gray-400'}`}>{authMode === 'login' ? 'Email se Login Karo' : 'Email se Signup Karo'}</button><p className="text-center mt-3"><span onClick={() => { setForgotStep('email'); }} className="text-brand font-bold text-sm cursor-pointer underline">Forgot Password? OTP se reset karein</span></p>{forgotStep && (<div className="mt-4 p-4 bg-gray-50 rounded-2xl border space-y-3"><div className="flex justify-between items-center"><p className="font-black text-sm">Reset Password (OTP)</p><button onClick={() => setForgotStep(null)} className="text-gray-400 font-bold text-sm">✕</button></div>{forgotStep === 'email' && (<div className="space-y-3"><input type="email" placeholder="Registered Email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border" /><p className="text-[11px] font-bold text-gray-400">Sirf email-password wale accounts ke liye. Google login walo ko reset ki zaroorat nahi.</p><button onClick={handleForgotSend} className="w-full bg-slate-900 text-white py-3 rounded-xl font-black text-sm">Send OTP</button></div>)}{forgotStep === 'otp' && (<div className="space-y-3"><input type="text" placeholder="6-digit OTP" value={forgotOtp} onChange={(e) => setForgotOtp(e.target.value)} className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border" /><button onClick={handleForgotVerify} className="w-full bg-slate-900 text-white py-3 rounded-xl font-black text-sm">Verify OTP</button></div>)}{forgotStep === 'newpass' && (<div className="space-y-3"><input type="password" placeholder="Naya Password (min 6)" value={forgotNewPass} onChange={(e) => setForgotNewPass(e.target.value)} className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border" /><button onClick={handleForgotReset} className="w-full bg-green-600 text-white py-3 rounded-xl font-black text-sm">Set New Password</button></div>)}</div>)}<p className="text-center font-bold text-gray-500 mt-6">{authMode === 'login' ? "New here? " : "Already member? "}<span onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')} className="text-brand cursor-pointer">Click here</span></p></div>
-        )}
-      </div>
+      <AuthModal
+        open={Boolean(authMode)}
+        mode={authMode || 'login'}
+        onClose={() => setAuthMode(null)}
+        onModeChange={setAuthMode}
+        onAuthed={saveSession}
+      />
 
       {contactGate && (
         <div className="fixed inset-0 z-[8500] bg-black/60 flex items-center justify-center p-6" onClick={() => setContactGate(false)}>

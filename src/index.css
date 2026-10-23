@@ -29,3 +29,21 @@ html, body, #root {
   animation: rk-shake 0.5s ease-in-out;
 }
 
+/* Auth surfaces: subtle entrance (motion = feedback, not decoration) */
+@keyframes rk-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.rk-fade-in {
+  animation: rk-fade-in 0.18s ease-out;
+}
+
+@keyframes rk-sheet-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.rk-sheet-in {
+  animation: rk-sheet-in 0.22s ease-out;
+}
+
+
