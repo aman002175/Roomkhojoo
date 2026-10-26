@@ -12,7 +12,7 @@ const STEPS = ['Email', 'Verify', 'Reset'];
 export default function ForgotPassword() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => new URLSearchParams(window.location.search).get('email') || '');
   const [otp, setOtp] = useState('');
   const [resetToken, setResetToken] = useState('');
   const [pass, setPass] = useState('');

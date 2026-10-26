@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { User, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft } from 'lucide-react';
+import { User, Users, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft, Search, MoreVertical, Ban, Trash2, Phone, Calendar, RefreshCw } from 'lucide-react';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (admin token)
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -38,6 +38,15 @@ export default function AdminPanel() {
   const [loginPass, setLoginPass] = useState('');
   const [adminRooms, setAdminRooms] = useState([]);
   const [activeTab, setActiveTab] = useState('analytics');
+  // 👥 Registered users management
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+  const [userMenuId, setUserMenuId] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+  const [userProfileBusy, setUserProfileBusy] = useState(false);
+  const [userActionBusy, setUserActionBusy] = useState(false);
   
   const [showCatModal, setShowCatModal] = useState(false);
   const [showFacModal, setShowFacModal] = useState(false);
@@ -137,6 +146,92 @@ export default function AdminPanel() {
       .then(data => { if (data.success) setStats(data.stats); })
       .catch(() => { /* stats optional */ });
   }, [isAuthenticated, refreshKey]);
+
+  // 👥 Users tab: search + list (debounced)
+  useEffect(() => {
+    if (!isAuthenticated || activeTab !== 'users') return undefined;
+    const t = setTimeout(() => {
+      setUsersLoading(true);
+      const q = userSearch.trim() ? `?search=${encodeURIComponent(userSearch.trim())}&limit=50` : '?limit=50';
+      apiFetch(`${ADMIN_API}/users${q}`, { headers: adminAuthHeaders() })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setAdminUsers(data.users || []);
+            setUsersTotal(data.total || 0);
+          }
+        })
+        .catch(() => { /* users load fail: silent */ })
+        .finally(() => setUsersLoading(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [isAuthenticated, activeTab, userSearch, refreshKey]);
+
+  const openUserProfile = async (id) => {
+    setUserMenuId(null);
+    setUserProfileBusy(true);
+    try {
+      const res = await apiFetch(`${ADMIN_API}/users/${id}`, { headers: adminAuthHeaders() });
+      const data = await res.json();
+      if (data.success) setUserProfile(data);
+      else alert(data.message || 'User profile load nahi hui.');
+    } catch { alert('Server connection failed.'); }
+    setUserProfileBusy(false);
+  };
+
+  const changeUserStatus = async (id, status) => {
+    if (userActionBusy) return;
+    let reason = '';
+    if (status !== 'active') {
+      reason = window.prompt(status === 'banned' ? 'Ban karne ki wajah (optional):' : 'Suspend karne ki wajah (optional):', '') || '';
+    }
+    if (status !== 'active' && !window.confirm(`Pakka ${status === 'banned' ? 'BAN' : 'SUSPEND'} karna hai? User turant logout ho jayega.`)) return;
+    setUserActionBusy(true);
+    setUserMenuId(null);
+    try {
+      const res = await apiFetch(`${ADMIN_API}/users/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() },
+        body: JSON.stringify({ status, reason })
+      });
+      const data = await res.json();
+      alert(data.message || (data.success ? 'Status update ho gaya.' : 'Status update nahi hua.'));
+      if (data.success) {
+        setRefreshKey(k => k + 1);
+        if (userProfile && String(userProfile.user.id) === String(id)) {
+          setUserProfile(prev => prev ? { ...prev, user: { ...prev.user, status: data.user.status, statusReason: data.user.statusReason } } : prev);
+        }
+      }
+    } catch { alert('Server connection failed.'); }
+    setUserActionBusy(false);
+  };
+
+  const deleteAdminUser = async (user) => {
+    if (userActionBusy) return;
+    if (!window.confirm(`${user.name || user.email} ka account aur uske saare ads hamesha ke liye delete honge. Ye undo nahi hota. Pakka?`)) return;
+    setUserActionBusy(true);
+    setUserMenuId(null);
+    try {
+      const res = await apiFetch(`${ADMIN_API}/users/${user.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() },
+        body: JSON.stringify({ confirm: 'DELETE' })
+      });
+      const data = await res.json();
+      alert(data.message || (data.success ? 'User delete ho gaya.' : 'User delete nahi hua.'));
+      if (data.success) {
+        setUserProfile(null);
+        setRefreshKey(k => k + 1);
+      }
+    } catch { alert('Server connection failed.'); }
+    setUserActionBusy(false);
+  };
+
+  const userStatusPill = (status) => {
+    if (status === 'suspended') return 'bg-amber-100 text-amber-700';
+    if (status === 'banned') return 'bg-red-100 text-red-700';
+    return 'bg-emerald-100 text-emerald-700';
+  };
 
   // 💬 P2 #57: chat khula ho toh 15s auto-refresh (tab hidden par pause, wapas aane par turant)
   useEffect(() => {
@@ -406,14 +501,15 @@ export default function AdminPanel() {
         <div className="flex gap-2">
           <button onClick={() => setRefreshKey(k => k + 1)} className="bg-white/10 p-2 rounded-lg active:scale-95 transition-transform" title="Refresh Data"><BarChart3 size={16} /></button>
           {/* P2 #59: Exit par saari admin state reset — next login par stale data flash na ho */}
-          <button onClick={() => { sessionStorage.removeItem('roomkhojo_admin_token'); setIsAuthenticated(false); setAdminRooms([]); setTickets([]); setClaims([]); setOpenCount(0); setStats(null); setChatTicketId(null); setAdminReply({}); setActiveTab('analytics'); setMigratePreview(null); setMigrateEmail(''); setOldPass(''); setNewAdminUser(''); setNewAdminPass(''); }} className="bg-red-500/20 text-red-100 p-2 rounded-lg text-sm font-bold flex items-center gap-2 active:scale-95 transition-transform"><LogOut size={16} className="shrink-0"/> Exit</button>
+          <button onClick={() => { sessionStorage.removeItem('roomkhojo_admin_token'); setIsAuthenticated(false); setAdminRooms([]); setTickets([]); setClaims([]); setOpenCount(0); setStats(null); setChatTicketId(null); setAdminReply({}); setActiveTab('analytics'); setMigratePreview(null); setMigrateEmail(''); setOldPass(''); setNewAdminUser(''); setNewAdminPass(''); setAdminUsers([]); setUsersTotal(0); setUserSearch(''); setUserMenuId(null); setUserProfile(null); }} className="bg-red-500/20 text-red-100 p-2 rounded-lg text-sm font-bold flex items-center gap-2 active:scale-95 transition-transform"><LogOut size={16} className="shrink-0"/> Exit</button>
         </div>
       </header>
       
       {/* Tabs */}
-      <div className="order-2 bg-white border-t shrink-0 px-2 pt-2 grid grid-cols-4 gap-1" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
+      <div className="order-2 bg-white border-t shrink-0 px-2 pt-2 grid grid-cols-5 gap-1" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
         <button onClick={() => setActiveTab('analytics')} className={`flex flex-col items-center gap-1 py-1 transition-all ${activeTab === 'analytics' ? 'text-brand scale-105' : 'text-gray-400'}`}><BarChart3 size={22} /><span className="text-[10px] font-black uppercase tracking-tighter">Analytics</span></button>
         <button onClick={() => setActiveTab('ads')} className={`flex flex-col items-center gap-1 py-1 transition-all relative ${activeTab === 'ads' ? 'text-brand scale-105' : 'text-gray-400'}`}><LayoutDashboard size={22} />{pendingAds.length > 0 && (<span className="absolute top-0 right-3 bg-orange-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center">{pendingAds.length}</span>)}<span className="text-[10px] font-black uppercase tracking-tighter">Ads</span></button>
+        <button onClick={() => setActiveTab('users')} className={`flex flex-col items-center gap-1 py-1 transition-all relative ${activeTab === 'users' ? 'text-brand scale-105' : 'text-gray-400'}`}><Users size={22} /><span className="text-[10px] font-black uppercase tracking-tighter">Users</span></button>
         <button onClick={() => setActiveTab('support')} className={`flex flex-col items-center gap-1 py-1 transition-all relative ${activeTab === 'support' ? 'text-brand scale-105' : 'text-gray-400'}`}><MessageCircle size={22} />{openCount > 0 && (<span className="absolute top-0 right-3 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center">{openCount}</span>)}<span className="text-[10px] font-black uppercase tracking-tighter">Support</span></button>
         <button onClick={() => setActiveTab('system')} className={`flex flex-col items-center gap-1 py-1 transition-all ${activeTab === 'system' ? 'text-brand scale-105' : 'text-gray-400'}`}><Settings size={22} /><span className="text-[10px] font-black uppercase tracking-tighter">System</span></button>
       </div>
@@ -423,7 +519,7 @@ export default function AdminPanel() {
         {/* Analytics Tab */}
         {activeTab === 'analytics' && (
           <div className="space-y-4 pb-10">
-            <div className="grid grid-cols-2 gap-3"><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Registered Users</p><p className="text-2xl font-black text-gray-800">{stats ? stats.uniqueUsers : uniqueUsersCount}</p></div><div className="bg-green-50 p-4 rounded-2xl shadow-sm border border-green-100"><p className="text-xs font-bold text-green-700 uppercase">{stats ? 'Revenue (Recorded)' : 'Est. Revenue'}</p><p className="text-2xl font-black text-green-800">₹{revenueTotal}</p>{stats ? (<p className="text-[10px] font-bold text-green-600 mt-1">Promo ₹{stats.promoRevenue} • Banner ₹{stats.bannerRevenue}</p>) : (<p className="text-[10px] font-bold text-green-600 mt-1">Approx — server stats load nahi hue</p>)}</div><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Ads</p><p className="text-2xl font-black text-gray-800">{stats ? stats.totalAds : adminRooms.length}</p><p className="text-[10px] font-bold text-gray-400 mt-1">{stats ? `${stats.liveAds} live • ${stats.pendingAds} pending` : ''}</p></div><div className="bg-orange-50 p-4 rounded-2xl shadow-sm border border-orange-100"><p className="text-xs font-bold text-orange-700 uppercase">Promo Ads</p><p className="text-2xl font-black text-orange-800">{stats ? stats.promoAds : promotedCount}</p>{stats ? (<p className="text-[10px] font-bold text-orange-600 mt-1">Banner LIVE: {stats.bannerActive}</p>) : null}</div></div>
+            <div className="grid grid-cols-2 gap-3"><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Registered Users</p><p className="text-2xl font-black text-gray-800">{stats ? (stats.registeredUsers ?? stats.uniqueUsers) : uniqueUsersCount}</p></div><div className="bg-green-50 p-4 rounded-2xl shadow-sm border border-green-100"><p className="text-xs font-bold text-green-700 uppercase">{stats ? 'Revenue (Recorded)' : 'Est. Revenue'}</p><p className="text-2xl font-black text-green-800">₹{revenueTotal}</p>{stats ? (<p className="text-[10px] font-bold text-green-600 mt-1">Promo ₹{stats.promoRevenue} • Banner ₹{stats.bannerRevenue}</p>) : (<p className="text-[10px] font-bold text-green-600 mt-1">Approx — server stats load nahi hue</p>)}</div><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Ads</p><p className="text-2xl font-black text-gray-800">{stats ? stats.totalAds : adminRooms.length}</p><p className="text-[10px] font-bold text-gray-400 mt-1">{stats ? `${stats.liveAds} live • ${stats.pendingAds} pending` : ''}</p></div><div className="bg-orange-50 p-4 rounded-2xl shadow-sm border border-orange-100"><p className="text-xs font-bold text-orange-700 uppercase">Promo Ads</p><p className="text-2xl font-black text-orange-800">{stats ? stats.promoAds : promotedCount}</p>{stats ? (<p className="text-[10px] font-bold text-orange-600 mt-1">Banner LIVE: {stats.bannerActive}</p>) : null}</div></div>
             {stats && (
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
                 <p className="text-xs font-bold text-gray-500 uppercase mb-2">Revenue Breakdown (recorded)</p>
@@ -436,6 +532,60 @@ export default function AdminPanel() {
               </div>
             )}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mt-4"><div className="p-4 border-b bg-gray-50"><h3 className="font-black text-gray-800 flex items-center gap-2"><Clock size={18}/> Users & Ad Status Report</h3></div><div className="p-0 overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold border-b"><tr><th className="p-3">User/Owner</th><th className="p-3">Ad Title</th><th className="p-3 text-brand">Pay Code</th><th className="p-3">Plan</th><th className="p-3">Status</th><th className="p-3">Action</th></tr></thead><tbody className="divide-y divide-gray-100">{adminRooms.map(room => (<tr key={room._id} className="hover:bg-gray-50"><td className="p-3 font-bold text-gray-800"><div className="flex items-center gap-2"><div className="w-6 h-6 bg-brand/10 text-brand rounded-full flex justify-center items-center text-[10px] shrink-0"><User size={12}/></div>{room.ownerName || 'Owner'}</div></td><td className="p-3 text-gray-600 line-clamp-1 max-w-[150px]">{room.title}</td><td className="p-3 font-black text-brand bg-brand/5 border-x">{room.paymentCode || 'FREE'}</td><td className="p-3">{room.isPromoted ? <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoPlan}D</span> : <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">Regular</span>}</td><td className="p-3">{getDaysLeft(room.expiryDate, room.promoPlan)}</td><td className="p-3"><a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka Ad ("${room.title}") jald hi expire hone wala hai.`)}`} target="_blank" rel="noreferrer" className="bg-[#25D366]/10 text-[#25D366] px-3 py-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform w-fit"><MessageCircle size={14}/> Alert</a></td></tr>))}</tbody></table></div></div>
+          </div>
+        )}
+
+        {/* Users Tab */}
+        {activeTab === 'users' && (
+          <div className="space-y-3 pb-10">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-black text-gray-800 flex items-center gap-2"><Users size={20} className="text-brand" /> Registered Users</h2>
+                <p className="text-[11px] font-bold text-gray-500">{usersTotal} users registered{usersTotal > adminUsers.length ? ` • latest ${adminUsers.length} shown — search for older` : ''}</p>
+              </div>
+              <button onClick={() => setRefreshKey(k => k + 1)} disabled={usersLoading} className="bg-white border border-gray-200 p-2.5 rounded-xl text-gray-600 active:scale-95 disabled:opacity-60"><RefreshCw size={16} className={usersLoading ? 'animate-spin' : ''} /></button>
+            </div>
+            <div className="relative">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input value={userSearch} onChange={(e) => setUserSearch(e.target.value)} placeholder="Naam, email ya mobile se search karein" className="w-full bg-white border border-gray-200 rounded-2xl py-3 pl-9 pr-3 font-bold text-sm outline-none focus:border-brand/40" />
+            </div>
+            {usersLoading && adminUsers.length === 0 ? (
+              <div className="text-center p-10 text-gray-400 font-bold text-sm">Users load ho rahe hain…</div>
+            ) : adminUsers.length === 0 ? (
+              <div className="text-center p-10 text-gray-500 font-bold text-sm">Koi user nahi mila.</div>
+            ) : (
+              <div className="space-y-2.5">
+                {adminUsers.map(u => (
+                  <div key={u.id} onClick={() => openUserProfile(u.id)} className="relative bg-white border border-gray-100 rounded-2xl p-3.5 flex items-center gap-3 cursor-pointer active:scale-[0.995] transition-transform">
+                    {u.pic ? <img src={u.pic} alt="" className="w-11 h-11 rounded-full object-cover shrink-0" /> : <div className="w-11 h-11 rounded-full bg-brand/10 text-brand flex items-center justify-center shrink-0 font-black text-sm">{(u.name || 'U').slice(0, 1).toUpperCase()}</div>}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-black text-gray-800 text-sm truncate">{u.name || 'User'}</p>
+                        <span className={`${userStatusPill(u.status)} px-1.5 py-0.5 rounded text-[9px] font-black uppercase shrink-0`}>{u.status}</span>
+                      </div>
+                      <p className="text-[11px] font-bold text-gray-500 truncate">{u.email}</p>
+                      <p className="text-[10px] font-bold text-gray-400">{u.phone || 'Mobile nahi'} • {u.listingCount} listing{u.listingCount === 1 ? '' : 's'}</p>
+                    </div>
+                    <div className="relative shrink-0">
+                      <button onClick={(e) => { e.stopPropagation(); setUserMenuId(userMenuId === u.id ? null : u.id); }} className="p-2 rounded-full text-gray-500 bg-gray-50 active:scale-95"><MoreVertical size={18} /></button>
+                      {userMenuId === u.id && (
+                        <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-30 w-44 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden">
+                          {u.status === 'active' ? (
+                            <>
+                              <button onClick={() => changeUserStatus(u.id, 'suspended')} className="w-full text-left px-3 py-2.5 text-xs font-black text-amber-700 hover:bg-amber-50 flex items-center gap-2"><ShieldAlert size={14} /> Suspend Account</button>
+                              <button onClick={() => changeUserStatus(u.id, 'banned')} className="w-full text-left px-3 py-2.5 text-xs font-black text-red-700 hover:bg-red-50 flex items-center gap-2"><Ban size={14} /> Ban Account</button>
+                            </>
+                          ) : (
+                            <button onClick={() => changeUserStatus(u.id, 'active')} className="w-full text-left px-3 py-2.5 text-xs font-black text-emerald-700 hover:bg-emerald-50 flex items-center gap-2"><Check size={14} /> Activate Account</button>
+                          )}
+                          <button onClick={() => deleteAdminUser(u)} className="w-full text-left px-3 py-2.5 text-xs font-black text-red-600 hover:bg-red-50 flex items-center gap-2 border-t border-gray-100"><Trash2 size={14} /> Delete User</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -774,6 +924,63 @@ export default function AdminPanel() {
             </div>
             
             <button className="w-full bg-blue-600 text-white py-3 rounded-xl font-black text-sm active:scale-95" onClick={() => { saveSystemSettings(sysCategories, sysFacilities, sysPricing); setShowFacModal(false); }}>Save to Database</button>
+          </div>
+        </div>
+      )}
+
+      {/* USER PROFILE MODAL */}
+      {userProfileBusy && (
+        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center">
+          <div className="bg-white rounded-2xl px-5 py-4 shadow-xl flex items-center gap-2 text-sm font-black text-gray-700"><RefreshCw size={16} className="animate-spin text-brand" /> User profile load ho rahi hai…</div>
+        </div>
+      )}
+      {userProfile && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4" onClick={() => setUserProfile(null)}>
+          <div className="bg-white w-full max-w-lg rounded-t-[28px] sm:rounded-3xl max-h-[90dvh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b flex items-center justify-between shrink-0">
+              <h2 className="font-black text-gray-800 flex items-center gap-2"><User size={18} className="text-brand" /> User Profile</h2>
+              <button onClick={() => setUserProfile(null)} className="bg-gray-100 p-2 rounded-full active:scale-90"><X size={18} /></button>
+            </div>
+            <div className="p-4 overflow-y-auto space-y-4">
+              <div className="flex items-center gap-3">
+                {userProfile.user.pic ? <img src={userProfile.user.pic} alt="" className="w-14 h-14 rounded-full object-cover" /> : <div className="w-14 h-14 rounded-full bg-brand/10 text-brand flex items-center justify-center font-black text-lg">{(userProfile.user.name || 'U').slice(0, 1).toUpperCase()}</div>}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap"><p className="font-black text-gray-800 truncate">{userProfile.user.name}</p><span className={`${userStatusPill(userProfile.user.status)} px-2 py-0.5 rounded text-[10px] font-black uppercase`}>{userProfile.user.status}</span></div>
+                  <p className="text-xs font-bold text-gray-500 truncate">{userProfile.user.email}</p>
+                  <p className="text-[11px] font-bold text-gray-400 flex items-center gap-1"><Phone size={11} /> {userProfile.user.phone || 'Mobile nahi'} • <Calendar size={11} /> {new Date(userProfile.user.createdAt).toLocaleDateString('en-IN')}</p>
+                </div>
+              </div>
+              {userProfile.user.statusReason && <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-2.5">Reason: {userProfile.user.statusReason}</p>}
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="bg-gray-50 rounded-xl p-2 border border-gray-100"><p className="text-[10px] font-black text-gray-500 uppercase">Total</p><p className="text-lg font-black text-gray-800">{userProfile.stats.total}</p></div>
+                <div className="bg-emerald-50 rounded-xl p-2 border border-emerald-100"><p className="text-[10px] font-black text-emerald-600 uppercase">Live</p><p className="text-lg font-black text-emerald-700">{userProfile.stats.live}</p></div>
+                <div className="bg-amber-50 rounded-xl p-2 border border-amber-100"><p className="text-[10px] font-black text-amber-600 uppercase">Pending</p><p className="text-lg font-black text-amber-700">{userProfile.stats.pending}</p></div>
+                <div className="bg-purple-50 rounded-xl p-2 border border-purple-100"><p className="text-[10px] font-black text-purple-600 uppercase">Services</p><p className="text-lg font-black text-purple-700">{userProfile.stats.services}</p></div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {userProfile.user.status !== 'active' && <button onClick={() => changeUserStatus(userProfile.user.id, 'active')} disabled={userActionBusy} className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 disabled:opacity-60">Activate</button>}
+                {userProfile.user.status !== 'suspended' && <button onClick={() => changeUserStatus(userProfile.user.id, 'suspended')} disabled={userActionBusy} className="bg-amber-500 text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 disabled:opacity-60">Suspend</button>}
+                {userProfile.user.status !== 'banned' && <button onClick={() => changeUserStatus(userProfile.user.id, 'banned')} disabled={userActionBusy} className="bg-red-500 text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 disabled:opacity-60">Ban</button>}
+                <button onClick={() => deleteAdminUser(userProfile.user)} disabled={userActionBusy} className="bg-white text-red-600 border border-red-200 px-3 py-2 rounded-xl text-xs font-black active:scale-95 disabled:opacity-60 flex items-center gap-1"><Trash2 size={13} /> Delete</button>
+              </div>
+              <div>
+                <p className="text-xs font-black text-gray-500 uppercase mb-2">Listings ({userProfile.rooms.length})</p>
+                {userProfile.rooms.length === 0 ? <p className="text-sm font-bold text-gray-400 bg-gray-50 rounded-xl p-4 text-center">Is user ne koi listing nahi ki.</p> : (
+                  <div className="space-y-2">
+                    {userProfile.rooms.map(r => (
+                      <div key={r._id} className="flex items-center gap-2.5 bg-gray-50 border border-gray-100 rounded-xl p-2.5">
+                        {r.image ? <img src={getImageUrl(r.image)} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" /> : <div className="w-10 h-10 rounded-lg bg-gray-200 shrink-0" />}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-black text-gray-800 truncate">{r.title}</p>
+                          <p className="text-[10px] font-bold text-gray-500">{r.price} • {r.listingType === 'service' ? 'Service' : r.type} • {r.category}</p>
+                        </div>
+                        <span className={`${r.isApproved && r.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded text-[9px] font-black uppercase shrink-0`}>{r.isApproved && r.isActive ? 'Live' : 'Pending'}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

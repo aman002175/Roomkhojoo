@@ -294,7 +294,7 @@ const pages = {
         sections: [
           {
             heading: '1. Kaunsi Jaankari Hum Lete Hain',
-            body: 'Account banane par: naam, email, password (encrypted). Ad post karne par: mobile number, room ki details, photos aur location. Google se login karne par: naam, email aur profile photo. Iske alawa basic technical records (device/browser type, error logs) sirf safety aur debugging ke liye.\n\nHum aapki marzi ke bina koi extra personal jaankari collect nahi karte.',
+            body: 'Account banane par: naam, email, mobile number, password (encrypted) aur email-OTP verification record. Ad/service post karne par: mobile number (agar alag diya ho), details, photos aur location. Google se login karne par: naam, email aur profile photo. Email change/account delete par OTP record sirf security verification ke liye rakha jata hai. Iske alawa basic technical records (device/browser type, error logs) sirf safety aur debugging ke liye.\n\nHum aapki marzi ke bina koi extra personal jaankari collect nahi karte.',
           },
           {
             heading: '2. Aapka Mobile Number — Hum Use Kaise Protect Karte Hain',
@@ -347,7 +347,7 @@ const pages = {
         sections: [
           {
             heading: '1. What Information We Collect',
-            body: 'When you create an account: name, email, password (encrypted). When you post an ad: mobile number, room details, photos and location. When you log in with Google: name, email and profile photo. In addition, basic technical records (device/browser type, error logs) purely for safety and debugging.\n\nWe do not collect any extra personal information without your consent.',
+            body: 'When you create an account: name, email, mobile number, password (encrypted) and email-OTP verification record. When you post an ad/service: mobile number (if different), details, photos and location. When you log in with Google: name, email and profile photo. Email-change/account-delete OTP records are kept only for security verification. In addition, basic technical records (device/browser type, error logs) purely for safety and debugging.\n\nWe do not collect any extra personal information without your consent.',
           },
           {
             heading: '2. Your Mobile Number — How We Protect It',
@@ -400,7 +400,7 @@ const pages = {
         sections: [
           {
             heading: '1. हम कौन-सी जानकारी लेते हैं',
-            body: 'अकाउंट बनाने पर: नाम, ईमेल, पासवर्ड (एन्क्रिप्टेड)। विज्ञापन पोस्ट करने पर: मोबाइल नंबर, कमरे की जानकारी, फ़ोटो और लोकेशन। Google से लॉगिन करने पर: नाम, ईमेल और प्रोफ़ाइल फ़ोटो। इसके अलावा बुनियादी तकनीकी रिकॉर्ड (डिवाइस/ब्राउज़र प्रकार, एरर लॉग) सिर्फ़ सुरक्षा और डिबगिंग के लिए।\n\nआपकी सहमति के बिना हम कोई अतिरिक्त व्यक्तिगत जानकारी नहीं लेते।',
+            body: 'अकाउंट बनाने पर: नाम, ईमेल, मोबाइल नंबर, पासवर्ड (एन्क्रिप्टेड) और ईमेल-OTP सत्यापन रिकॉर्ड। विज्ञापन/सेवा पोस्ट करने पर: मोबाइल नंबर (अगर अलग दिया हो), जानकारी, फ़ोटो और लोकेशन। Google से लॉगिन करने पर: नाम, ईमेल और प्रोफ़ाइल फ़ोटो। ईमेल बदलने/अकाउंट डिलीट पर OTP रिकॉर्ड सिर्फ़ सुरक्षा सत्यापन के लिए रखा जाता है। इसके अलावा बुनियादी तकनीकी रिकॉर्ड (डिवाइस/ब्राउज़र प्रकार, एरर लॉग) सिर्फ़ सुरक्षा और डिबगिंग के लिए।\n\nआपकी सहमति के बिना हम कोई अतिरिक्त व्यक्तिगत जानकारी नहीं लेते।',
           },
           {
             heading: '2. आपका मोबाइल नंबर — हम इसे कैसे सुरक्षित रखते हैं',

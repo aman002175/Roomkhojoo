@@ -35,6 +35,12 @@ const TYPE_OPTIONS = {
 const DEFAULT_TYPES = ['Boys', 'Girls', 'Family', 'Anyone'];
 const typesForCategory = (cat) => TYPE_OPTIONS[cat] || DEFAULT_TYPES;
 
+// Service providers (tiffin/laundry etc.) — separate listing type + auto banner strip
+const SERVICE_CATEGORIES = ['Tiffin / Meals', 'Laundry', 'Tuition / Coaching', 'Gym / Fitness', 'Internet / Cable', 'Cleaning / House Help', 'Water / RO', 'Other Service'];
+const savedUserPhone = () => {
+  try { return String(JSON.parse(localStorage.getItem('roomkhojo_user') || '{}').phone || ''); } catch { return ''; }
+};
+
 // 👁 Session me dekhe gaye room IDs (view-count spam guard, tab lifetime)
 const viewedIds = new Set();
 
@@ -124,7 +130,7 @@ const PoiIcon = ({ cat, size = 14, className = '' }) => {
 };
 
 // Category → professional icon (custom categories par Tag fallback)
-const CAT_ICONS = { all: Home, PG: Users, Flat: Building2, Room: Home, Hostel: Hotel, Library: BookOpen, Office: Briefcase };
+const CAT_ICONS = { all: Home, PG: Users, Flat: Building2, Room: Home, Hostel: Hotel, Library: BookOpen, Office: Briefcase, __services: Briefcase };
 const catIcon = (id) => CAT_ICONS[id] || Tag;
 
 // Overpass API (P2 #43: ab backend proxy se — cache + server-side timeout)
@@ -237,6 +243,8 @@ export default function MainApp() {
   
   const [isPostAdOpen, setIsPostAdOpen] = useState(false); 
   const [isPickingLocation, setIsPickingLocation] = useState(false);
+  const pickSnapshotRef = useRef(null);
+  const pickCanceledRef = useRef(false);
   const [showLocationWarning, setShowLocationWarning] = useState(false);
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
   const [isLocating, setIsLocating] = useState(false);
@@ -246,8 +254,10 @@ export default function MainApp() {
   const [showPaymentWindow, setShowPaymentWindow] = useState(false);
   const [payCode, setPayCode] = useState('');
 
+  const [postKind, setPostKind] = useState('room'); // room | service
   const [postTitle, setPostTitle] = useState('');
   const [postPrice, setPostPrice] = useState(''); 
+  const [postDesc, setPostDesc] = useState('');
   const [postCategory, setPostCategory] = useState('PG');
   const [postType, setPostType] = useState('Boys'); 
   const [postMobile, setPostMobile] = useState('');
@@ -295,7 +305,7 @@ export default function MainApp() {
   });
 
   // Hotfix: batch-9 refactor me ye definition galti se delete ho gayi thi — chips row "dynamicCategories is not defined" crash karta tha
-  const dynamicCategories = [{ id: 'all', name: 'All Rooms' }, ...(sysSettings.categories || []).map(cat => ({ id: cat, name: cat }))];
+  const dynamicCategories = [{ id: 'all', name: 'All Rooms' }, { id: '__services', name: 'Services' }, ...(sysSettings.categories || []).map(cat => ({ id: cat, name: cat }))];
 
   // P1 #33: rooms load-fail par misleading "koi result nahi" nahi — error card + Retry
   const [roomsError, setRoomsError] = useState(false);
@@ -501,10 +511,12 @@ export default function MainApp() {
     if (navigator.geolocation) {
       setIsLocating(true);
       navigator.geolocation.getCurrentPosition((pos) => {
+        setIsLocating(false);
+        // User ne location-pick cancel kiya — late GPS callback form/map ko chhuna nahi chahiye.
+        if (sharp && pickCanceledRef.current) { pickCanceledRef.current = false; return; }
         const { latitude, longitude, accuracy } = pos.coords;
         const acc = Math.round(accuracy || 0);
         setGpsAccuracy(acc);
-        setIsLocating(false);
         const zoom = sharp ? (acc <= 30 ? 18 : acc <= 100 ? 17 : acc <= 300 ? 16 : 15) : (acc <= 100 ? 16.5 : 15.5);
         if(map.current) map.current.flyTo({ center: [longitude, latitude], zoom });
         setPostLng(longitude); setPostLat(latitude);
@@ -520,6 +532,7 @@ export default function MainApp() {
         }
       }, () => {
         setIsLocating(false);
+        if (sharp && pickCanceledRef.current) { pickCanceledRef.current = false; return; }
         alert("Location permission denied ya accuracy issue hai. Kripya map par drag karke location pin karein.");
       }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
     }
@@ -569,7 +582,8 @@ export default function MainApp() {
   };
 
   const initiatePayment = () => {
-    if(!postTitle || !postPrice || !postMobile) return alert("Title, Price aur Mobile zaroori hai!");
+    if(!postTitle || !postPrice || !postMobile) return alert(postKind === 'service' ? "Service name, Price aur Mobile zaroori hai!" : "Title, Price aur Mobile zaroori hai!");
+    if (!/^[6-9]\d{9}$/.test(String(postMobile).replace(/\D/g, '').slice(-10))) return alert("Sahi 10-digit mobile number dalein.");
     if(!postLng || !postLat) return alert("Kripya map par location select karein! 'Map' button par click karein ya Live Location chunein.");
     const amount = getPayAmount();
     if (amount === '0' || amount === '') {
@@ -593,8 +607,9 @@ export default function MainApp() {
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
       const fd = new FormData();
-      fd.append('title', postTitle); fd.append('price', `₹${postPrice}`); fd.append('category', postCategory); fd.append('type', postType); fd.append('landmark', postLandmark); fd.append('mobile', postMobile); 
-      fd.append('description', selectedFacilities.join(', '));
+      fd.append('listingType', postKind);
+      fd.append('title', postTitle); fd.append('price', `₹${postPrice}`); fd.append('category', postCategory); fd.append('type', postKind === 'service' ? 'Service' : postType); fd.append('landmark', postLandmark); fd.append('mobile', postMobile);
+      fd.append('description', postKind === 'service' ? postDesc.trim() : selectedFacilities.join(', '));
       fd.append('lng', postLng); fd.append('lat', postLat); fd.append('isPromoted', adType === 'promo');
       fd.append('promoPlan', adType === 'promo' ? promoPlan : 'regular');
       fd.append('paymentRef', payRef.trim());
@@ -650,8 +665,8 @@ export default function MainApp() {
   // P2 #45: submit ke baad PURA form reset — landmark/category/pin/plan kuch bhi stale na rahe
   const resetPostForm = () => {
     setIsPostAdOpen(false); setShowPaymentWindow(false); setIsPickingLocation(false);
-    setPostTitle(''); setPostPrice(''); setPostMobile(''); setPostLandmark(''); setPostMapUrl('');
-    setSelectedFacilities([]); setPoiSelected([]);
+    setPostKind('room'); setPostTitle(''); setPostPrice(''); setPostDesc(''); setPostMobile(savedUserPhone()); setPostLandmark(''); setPostMapUrl('');
+    setSelectedFacilities([]); setPoiSelected([]); pickSnapshotRef.current = null; pickCanceledRef.current = false;
     setPostLng(null); setPostLat(null); setGpsAccuracy(null);
     setAdType('regular'); setPromoPlan('7'); setWantBanner(false);
     setPayRef(''); setPayCode('');
@@ -722,8 +737,9 @@ export default function MainApp() {
 
   // useMemo: har render par nayi array NA banao — warna markers bekaar me rebuild (flicker)
   const filteredRooms = useMemo(() => rooms.filter(r => {
-    const matchesCategory = activeCategory === 'all' || r.category === activeCategory;
-    const matchesAudience = activeAudience === 'all' || (r.type || '') === activeAudience;
+    const matchesCategory = activeCategory === 'all'
+      || (activeCategory === '__services' ? r.listingType === 'service' : r.category === activeCategory);
+    const matchesAudience = activeCategory === '__services' || activeAudience === 'all' || (r.type || '') === activeAudience;
     const price = priceNum(r.price);
     const okMin = minPrice === '' || price >= Number(minPrice);
     const okMax = maxPrice === '' || price <= Number(maxPrice);
@@ -733,7 +749,7 @@ export default function MainApp() {
     }
     const searchStr = searchQuery.toLowerCase();
     // P1 #30: title/type/category missing ho (purana/khaali data) toh bhi crash nahi
-    const matchesSearch = (r.title || '').toLowerCase().includes(searchStr) || (r.landmark || 'hanumangarh').toLowerCase().includes(searchStr) || (r.type || '').toLowerCase().includes(searchStr) || (r.category || '').toLowerCase().includes(searchStr);
+    const matchesSearch = (r.title || '').toLowerCase().includes(searchStr) || (r.landmark || 'hanumangarh').toLowerCase().includes(searchStr) || (r.type || '').toLowerCase().includes(searchStr) || (r.category || '').toLowerCase().includes(searchStr) || (r.listingType === 'service' && 'service'.includes(searchStr));
     return matchesCategory && matchesAudience && matchesSearch && okMin && okMax && okNear;
   }), [rooms, activeCategory, activeAudience, searchQuery, minPrice, maxPrice, nearRadius, userLoc]);
 
@@ -1228,6 +1244,11 @@ export default function MainApp() {
   }, [sortedRooms, selectedRoom]);
 
   const openPostAdForm = () => {
+    // Signup/profile ka mobile listing form me prefill — user chaahe toh badal bhi sakta hai.
+    if (!postMobile) {
+      const saved = savedUserPhone();
+      if (saved) setPostMobile(saved);
+    }
     // Form TURANT kholo — location ka 5-sec wait khatam.
     // Location background me best-effort (mil gayi toh pre-pin, nahi toh Map button hai).
     setIsPostAdOpen(true);
@@ -1250,6 +1271,43 @@ export default function MainApp() {
       return;
     }
     openPostAdForm();
+  };
+
+  const startPickingLocation = () => {
+    pickSnapshotRef.current = { lng: postLng, lat: postLat, accuracy: gpsAccuracy };
+    pickCanceledRef.current = false;
+    setIsPostAdOpen(false);
+    setIsPickingLocation(true);
+    setView('map');
+    setGpsAccuracy(null);
+    handleLiveLocation(true);
+  };
+
+  const cancelPickingLocation = () => {
+    pickCanceledRef.current = true;
+    setIsLocating(false);
+    const snap = pickSnapshotRef.current;
+    if (snap) {
+      setPostLng(snap.lng);
+      setPostLat(snap.lat);
+      setGpsAccuracy(snap.accuracy);
+    }
+    pickSnapshotRef.current = null;
+    setIsPickingLocation(false);
+    setIsPostAdOpen(true);
+  };
+
+  const confirmPickingLocation = () => {
+    if (!map.current) return;
+    const center = map.current.getCenter();
+    pickCanceledRef.current = false;
+    setPostLng(center.lng);
+    setPostLat(center.lat);
+    reverseGeocode(center.lat, center.lng);
+    setIsPickingLocation(false);
+    setGpsAccuracy(null);
+    pickSnapshotRef.current = null;
+    setIsPostAdOpen(true);
   };
 
   return (
@@ -1282,7 +1340,7 @@ export default function MainApp() {
             </div>
           )}
         </div>
-        {activeCategory !== 'all' && (
+        {activeCategory !== 'all' && activeCategory !== '__services' && (
           <div className="flex overflow-x-auto no-scrollbar pb-2 px-3 gap-2">
             {['all', ...typesForCategory(activeCategory)].map(aud => (
               <button key={aud} onClick={() => setActiveAudience(aud)} className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-black whitespace-nowrap border ${activeAudience === aud ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-gray-500 border-gray-200'}`}>
@@ -1320,7 +1378,7 @@ export default function MainApp() {
               <div onClick={openBannerRoom} data-room-idx={bannerIndex % bannerRooms.length} className="bg-white/95 backdrop-blur rounded-xl shadow-lg border border-purple-200 px-2 py-1.5 flex items-center gap-2 active:scale-[0.98] transition-transform cursor-pointer">
                 <img src={getImageUrl(b.image)} className="w-11 h-11 rounded-lg object-cover bg-gray-200 shrink-0" alt="Sponsored" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[8px] font-black text-purple-600 uppercase tracking-wider flex items-center gap-1"><Star size={10} fill="currentColor" /> Sponsored</p>
+                  <p className="text-[8px] font-black text-purple-600 uppercase tracking-wider flex items-center gap-1"><Star size={10} fill="currentColor" /> {b.listingType === 'service' ? 'Service Ad' : 'Sponsored'}</p>
                   <p className="font-black text-gray-800 text-[13px] leading-tight truncate">{b.title}</p>
                   <p className="text-brand font-black text-[13px]">{b.price} <span className="text-[10px] text-gray-400 font-bold">• {b.category} • {b.type}</span></p>
                 </div>
@@ -1357,7 +1415,7 @@ export default function MainApp() {
               <div key={room._id} className={`bg-white rounded-3xl overflow-hidden shadow-md border ${room.isPromoted ? 'border-orange-200' : 'border-gray-50'}`}>
                 <div className="relative"><img src={getImageUrl(room.image)} className="w-full h-48 object-cover bg-gray-200" alt="Room" />{isFeatured(room) && <div className="absolute top-3 left-3 bg-orange-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1"><Star size={10} fill="currentColor" /> Featured</div>}<div className="absolute top-3 right-3 bg-white/90 px-3 py-1 rounded-full text-brand font-black">{room.price}</div></div>
                 <div className="p-4">
-                  <div className="flex justify-between items-start mb-1"><h3 className="font-bold text-gray-900 text-lg leading-tight">{room.title}</h3><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-2">{room.type} • {room.category}</span></div>
+                  <div className="flex justify-between items-start mb-1"><h3 className="font-bold text-gray-900 text-lg leading-tight">{room.title}</h3><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-2">{room.listingType === 'service' ? 'Service' : room.type} • {room.category}</span></div>
                   <p className="text-sm font-bold text-gray-500 flex items-center gap-1"><MapPin size={14} className="shrink-0" /> {room.landmark || 'Hanumangarh'}</p>
                   {Array.isArray(room.landmarks) && room.landmarks.length > 0 && (<div className="mt-1 space-y-0.5">{room.landmarks.slice(0, 3).map((l, i) => (<p key={i} className="text-[11px] font-bold text-purple-700 flex items-center gap-1"><PoiIcon cat={l.cat} size={12} /><span className="truncate">{l.name} ({fmtDist(l.distM)})</span></p>))}{room.landmarks.length > 3 && (<p className="text-[10px] font-bold text-purple-500">+{room.landmarks.length - 3} aur</p>)}</div>)}
                   <div className="flex gap-2 mt-3 items-center">
@@ -1373,7 +1431,7 @@ export default function MainApp() {
         {selectedRoom && view === 'map' && !isPickingLocation && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-h-[42dvh] overflow-y-auto bg-white rounded-2xl shadow-2xl z-[100] p-3 border border-gray-100">
               <button onClick={closeRoomPopup} className="absolute top-2 right-2 w-8 h-8 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-600 z-10"><X size={18}/></button>
-            <div className="flex gap-3 mb-2"><div className="flex gap-2 overflow-x-auto shrink-0 max-w-[45%] no-scrollbar">{roomGallery(selectedRoom).map((u, i) => (<img key={i} src={getImageUrl(u)} className="w-16 h-16 object-cover rounded-xl bg-gray-200 shrink-0 border border-gray-100" alt={`Room ${i + 1}`} />))}</div><div className="flex-1"><div className="flex justify-between items-start pr-10"><h3 className="font-black text-gray-800 line-clamp-1">{selectedRoom.title}</h3><span className="bg-brand/10 text-brand px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-1">{selectedRoom.category}</span></div><p className="text-brand font-black text-xl leading-none mt-1">{selectedRoom.price}</p><p className="text-[11px] font-bold text-gray-500 mt-1.5 flex items-center gap-1"><User size={12}/> {selectedRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {revealedContacts[selectedRoom._id] ? `+91 ${revealedContacts[selectedRoom._id]}` : '••••• •••••'}</p></div></div>
+            <div className="flex gap-3 mb-2"><div className="flex gap-2 overflow-x-auto shrink-0 max-w-[45%] no-scrollbar">{roomGallery(selectedRoom).map((u, i) => (<img key={i} src={getImageUrl(u)} className="w-16 h-16 object-cover rounded-xl bg-gray-200 shrink-0 border border-gray-100" alt={`Room ${i + 1}`} />))}</div><div className="flex-1"><div className="flex justify-between items-start pr-10"><h3 className="font-black text-gray-800 line-clamp-1">{selectedRoom.title}</h3><span className="bg-brand/10 text-brand px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-1">{selectedRoom.listingType === 'service' ? 'Service' : selectedRoom.category}</span></div><p className="text-brand font-black text-xl leading-none mt-1">{selectedRoom.price}</p><p className="text-[11px] font-bold text-gray-500 mt-1.5 flex items-center gap-1"><User size={12}/> {selectedRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {revealedContacts[selectedRoom._id] ? `+91 ${revealedContacts[selectedRoom._id]}` : '••••• •••••'}</p></div></div>
             {selectedRoom.description && (<div className="flex gap-1.5 mb-2 pt-2 border-t border-gray-50 overflow-x-auto no-scrollbar flex-nowrap">{selectedRoom.description.split(', ').map(fac => (<span key={fac} className="bg-gray-50 text-gray-600 border px-2 py-1 rounded-md text-[9px] font-bold uppercase shrink-0">{fac}</span>))}</div>)}
             {Array.isArray(selectedRoom.landmarks) && selectedRoom.landmarks.length > 0 && (<div className="bg-purple-50 border border-purple-100 rounded-xl p-2 mb-2"><p className="text-[10px] font-black text-purple-700 uppercase mb-1 flex items-center gap-1"><MapPin size={12} /> Aas-paas ki jagah</p>{selectedRoom.landmarks.map((l, i) => (<p key={i} className="text-[11px] font-bold text-gray-700 flex items-center gap-1"><PoiIcon cat={l.cat} size={12} /><span>{l.name} — <span className="text-purple-700">{fmtDist(l.distM)}</span></span></p>))}</div>)}
             <div className="flex gap-2 items-center mb-3">
@@ -1385,8 +1443,14 @@ export default function MainApp() {
         )}
       </div>
 
-      {isPickingLocation ? (<div className="bg-white border-t py-3 px-6 flex justify-between items-center z-50 h-[64px] shrink-0"><button onClick={() => { if (!map.current) return; const center = map.current.getCenter(); setPostLng(center.lng); setPostLat(center.lat); reverseGeocode(center.lat, center.lng); setIsPickingLocation(false); setGpsAccuracy(null); setIsPostAdOpen(true); }} className="w-full bg-brand text-white py-2.5 rounded-2xl font-black shadow-lg flex justify-center items-center gap-2 active:scale-95 transition-transform"><MapPin size={20}/> Confirm Location</button></div>) : (<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={handlePostAdClick} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/privacy')} className="hover:text-brand transition-colors">Privacy</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by 29 Dev's</a></div></div>)}
-
+      {isPickingLocation ? (
+        <div className="bg-white border-t py-3 px-4 flex items-center gap-3 z-50 h-[64px] shrink-0">
+          <button onClick={cancelPickingLocation} className="px-5 py-2.5 rounded-2xl font-black text-sm border-2 border-gray-200 text-gray-600 active:scale-95 transition-transform">Cancel</button>
+          <button onClick={confirmPickingLocation} className="flex-1 bg-brand text-white py-2.5 rounded-2xl font-black shadow-lg flex justify-center items-center gap-2 active:scale-95 transition-transform"><MapPin size={20}/> Confirm Location</button>
+        </div>
+      ) : (
+<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={handlePostAdClick} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/privacy')} className="hover:text-brand transition-colors">Privacy</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by 29 Dev's</a></div></div>
+      )}
       <div className={`fixed inset-0 z-[8000] transition-opacity duration-300 ${isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}><div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setIsMenuOpen(false)}></div><div className={`absolute top-0 left-0 bottom-0 w-[80%] max-w-sm bg-white flex flex-col transition-transform duration-300 ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}><div className="p-6 bg-brand/5 border-b"><h2 className="text-3xl font-black text-gray-800">Room<span className="text-brand">Khojo</span></h2></div><div className="p-4 space-y-2 flex-1 overflow-y-auto mt-4">{isLoggedIn && (<button onClick={() => { navigate('/dashboard'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><User size={20} className="text-brand"/> My Ads / Dashboard</div> <ChevronRight size={18} className="text-gray-400"/></button>)}{isLoggedIn && (<button onClick={handleLogout} className="w-full flex items-center justify-between p-4 rounded-2xl bg-red-50 hover:bg-red-100 font-bold text-red-600"><div className="flex items-center gap-3"><LogOut size={20}/> Logout</div> <ChevronRight size={18} className="text-red-300"/></button>)}{/* P2 #59: logout ab menu me bhi (dashboard settings ke saath) */}<button onClick={() => { navigate('/about'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Info size={20} className="text-brand"/> About Us</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/terms'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><FileText size={20} className="text-brand"/> Terms</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/privacy'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Lock size={20} className="text-brand"/> Privacy Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/refund'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Shield size={20} className="text-brand"/> Refund Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { if (!isLoggedIn) { setIsMenuOpen(false); setAuthMode('login'); } else { navigate('/support'); setIsMenuOpen(false); } }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-brand/5 hover:bg-brand/10 font-bold text-gray-700 border border-brand/20"><div className="flex items-center gap-3"><LifeBuoy size={20} className="text-brand"/> Support</div> <ChevronRight size={18} className="text-gray-400"/></button></div></div></div>
       <AuthModal
         open={Boolean(authMode)}
@@ -1420,18 +1484,57 @@ export default function MainApp() {
 
       <div className={`fixed inset-0 z-[7000] bg-black/60 overflow-hidden transition-opacity ${isPostAdOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
         <div className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-[30px] flex flex-col transition-transform duration-500 ${isPostAdOpen ? 'translate-y-0' : 'translate-y-full'}`} style={{ maxHeight: '92dvh' }}>
-          <div className="p-5 border-b shrink-0 flex justify-between items-center sticky top-0 bg-white rounded-t-[30px] z-10"><h2 className="text-xl font-black">Post Room Ad</h2><button onClick={() => setIsPostAdOpen(false)} className="bg-gray-100 p-2 rounded-full"><X size={20}/></button></div>
+          <div className="p-5 border-b shrink-0 flex justify-between items-center sticky top-0 bg-white rounded-t-[30px] z-10"><h2 className="text-xl font-black">Post Ad</h2><button onClick={() => setIsPostAdOpen(false)} className="bg-gray-100 p-2 rounded-full"><X size={20}/></button></div>
           <div className="p-5 overflow-y-auto overflow-x-hidden space-y-5 flex-1">
-             <div className="flex bg-gray-100 p-1 rounded-2xl border"><button onClick={() => setAdType('regular')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all shadow-sm ${adType === 'regular' ? 'bg-white text-gray-900 border' : 'text-gray-400'}`}>Standard Ad</button><button onClick={() => setAdType('promo')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all shadow-md flex items-center justify-center gap-1.5 ${adType === 'promo' ? 'bg-orange-500 text-white' : 'text-gray-400'}`}><Star size={14} fill="currentColor" /> Promoted Ad</button></div>
-             {adType === 'promo' && (<div className="flex gap-2"><button onClick={() => setPromoPlan('7')} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${promoPlan === '7' ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>7 Days<br/><span className="text-lg">₹{sysSettings.pricing.promo7}</span></button><button onClick={() => setPromoPlan('15')} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${promoPlan === '15' ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>15 Days<br/><span className="text-lg">₹{sysSettings.pricing.promo15}</span></button><button onClick={() => setPromoPlan('30')} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${promoPlan === '30' ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>30 Days<br/><span className="text-lg">₹{sysSettings.pricing.promo30}</span></button></div>)}
+             <div className="grid grid-cols-2 gap-1 rounded-2xl bg-gray-100 p-1 border">
+               <button type="button" onClick={() => { setPostKind('room'); setAdType('regular'); setWantBanner(false); setPostCategory((sysSettings.categories && sysSettings.categories[0]) || 'PG'); setPostType(typesForCategory((sysSettings.categories && sysSettings.categories[0]) || 'PG')[0]); }} className={`py-3 rounded-xl font-black text-sm transition-all ${postKind === 'room' ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-400'}`}>Room / Property</button>
+               <button type="button" onClick={() => { setPostKind('service'); setAdType('regular'); setWantBanner(false); setPostCategory(SERVICE_CATEGORIES[0]); setPostType('Service'); }} className={`py-3 rounded-xl font-black text-sm transition-all ${postKind === 'service' ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-400'}`}>Service Provider</button>
+             </div>
+             {postKind === 'room' && (
+               <>
+                 <div className="flex bg-gray-100 p-1 rounded-2xl border"><button type="button" onClick={() => setAdType('regular')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all shadow-sm ${adType === 'regular' ? 'bg-white text-gray-900 border' : 'text-gray-400'}`}>Standard Ad</button><button type="button" onClick={() => setAdType('promo')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all shadow-md flex items-center justify-center gap-1.5 ${adType === 'promo' ? 'bg-orange-500 text-white' : 'text-gray-400'}`}><Star size={14} fill="currentColor" /> Promoted Ad</button></div>
+                 {adType === 'promo' && (<div className="flex gap-2"><button type="button" onClick={() => setPromoPlan('7')} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${promoPlan === '7' ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>7 Days<br/><span className="text-lg">₹{sysSettings.pricing.promo7}</span></button><button type="button" onClick={() => setPromoPlan('15')} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${promoPlan === '15' ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>15 Days<br/><span className="text-lg">₹{sysSettings.pricing.promo15}</span></button><button type="button" onClick={() => setPromoPlan('30')} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${promoPlan === '30' ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>30 Days<br/><span className="text-lg">₹{sysSettings.pricing.promo30}</span></button></div>)}
+               </>
+             )}
               <div>
                 <label className="bg-brand/5 h-24 rounded-2xl border-2 border-dashed border-brand/30 flex flex-col items-center justify-center gap-2 text-brand cursor-pointer"><Camera size={24}/><span className="font-bold text-xs">{isCompressingPhotos ? 'Photos optimize ho rahi hain…' : postImages.length > 0 ? `${postImages.length}/6 Photos Selected` : 'Upload Photos (max 6)'}</span><input type="file" className="hidden" multiple accept="image/*" onChange={addPostPhotos} disabled={isCompressingPhotos} /></label>
                 {postImages.length > 0 && (<div className="grid grid-cols-3 gap-2 mt-2">{postImages.map((p, i) => (<div key={i} className="relative"><img src={p.url} className="w-full h-20 rounded-xl object-cover border border-gray-200" alt={`Photo ${i + 1}`} /><button type="button" onClick={() => removePostPhoto(i)} className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs font-black flex items-center justify-center shadow">✕</button><span className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] font-black px-1.5 py-0.5 rounded">{i + 1}</span></div>))}</div>)}
               </div>
-              <div className={`flex items-center justify-between p-3 rounded-2xl border-2 transition-colors ${wantBanner ? 'bg-purple-50 border-purple-400' : 'bg-gray-50 border-transparent'}`}><div><p className="text-sm font-black text-gray-800 flex items-center gap-1.5"><Megaphone size={16} className="text-purple-600" /> Top Banner Add-on</p><p className="text-[11px] font-bold text-gray-500">₹{sysSettings.pricing.bannerPrice || '499'} • {sysSettings.pricing.bannerDays || '7'} din top strip par (paid)</p></div><button type="button" onClick={() => setWantBanner(!wantBanner)} className={`w-12 h-7 rounded-full font-black text-[10px] transition-colors ${wantBanner ? 'bg-purple-600 text-white' : 'bg-gray-300 text-gray-500'}`}>{wantBanner ? 'ON' : 'OFF'}</button></div>
-             <div className="space-y-3"><input type="text" value={postTitle} onChange={(e) => setPostTitle(e.target.value)} placeholder="Title" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm" /><div className="flex gap-3"><select value={postCategory} onChange={(e) => { setPostCategory(e.target.value); const opts = typesForCategory(e.target.value); setPostType(opts[0]); }} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm">{sysSettings.categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}</select><select value={postType} onChange={(e) => setPostType(e.target.value)} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm">{typesForCategory(postCategory).map(t => <option key={t} value={t}>{t}</option>)}</select></div><div className="flex gap-3"><input type="number" value={postPrice} onChange={(e) => setPostPrice(e.target.value)} placeholder="Rent (₹)/Month" className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><input type="number" value={postMobile} onChange={(e) => setPostMobile(e.target.value)} placeholder="Mobile No." className="flex-[1.5] min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/></div></div>
-             <div><p className="text-xs font-black text-gray-500 mb-2 uppercase">Select Facilities</p><div className="flex flex-wrap gap-2">{(sysSettings.facilities || []).map(fac => (<button type="button" key={fac} onClick={() => setSelectedFacilities(prev => prev.includes(fac) ? prev.filter(f => f !== fac) : [...prev, fac])} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${selectedFacilities.includes(fac) ? 'bg-brand text-white border-brand shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>{fac}</button>))}</div></div>
-              <div className="flex flex-wrap gap-2 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 min-w-[140px] p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button onClick={refreshGpsPin} disabled={isLocating} title="GPS se refresh" className="p-3 shrink-0 rounded-2xl font-black text-xs flex items-center justify-center border-2 bg-gray-50 text-gray-600 border-gray-200 active:scale-95 disabled:opacity-60">{isLocating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button><button onClick={() => { setIsPostAdOpen(false); setIsPickingLocation(true); setView('map'); setGpsAccuracy(null); handleLiveLocation(true); }} className={`p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLng ? 'bg-green-50 text-green-600 border-green-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={16}/> {postLng ? (gpsAccuracy ? `Pinned! ±${gpsAccuracy}m` : 'Pinned!') : 'Map'}</button><button onClick={openPoiPicker} className="p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={16} /> Nearby</button></div>
+              {postKind === 'room' ? (
+                <div className={`flex items-center justify-between p-3 rounded-2xl border-2 transition-colors ${wantBanner ? 'bg-purple-50 border-purple-400' : 'bg-gray-50 border-transparent'}`}><div><p className="text-sm font-black text-gray-800 flex items-center gap-1.5"><Megaphone size={16} className="text-purple-600" /> Top Banner Add-on</p><p className="text-[11px] font-bold text-gray-500">₹{sysSettings.pricing.bannerPrice || '499'} • {sysSettings.pricing.bannerDays || '7'} din top strip par (paid)</p></div><button type="button" onClick={() => setWantBanner(!wantBanner)} className={`w-12 h-7 rounded-full font-black text-[10px] transition-colors ${wantBanner ? 'bg-purple-600 text-white' : 'bg-gray-300 text-gray-500'}`}>{wantBanner ? 'ON' : 'OFF'}</button></div>
+              ) : (
+                <div className="flex items-start gap-2.5 rounded-2xl border border-purple-200 bg-purple-50 p-3">
+                  <Megaphone size={18} className="mt-0.5 shrink-0 text-purple-600" />
+                  <p className="text-[11px] font-bold leading-relaxed text-purple-800">Service provider ads admin approval ke baad map ke upar banner strip me automatically dikhte hain — alag banner payment ki zaroorat nahi.</p>
+                </div>
+              )}
+             <div className="space-y-3">
+               <input type="text" value={postTitle} onChange={(e) => setPostTitle(e.target.value)} placeholder={postKind === 'service' ? 'Business / Service name' : 'Title'} className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm" />
+               <div className="flex gap-3">
+                 {postKind === 'service' ? (
+                   <select value={postCategory} onChange={(e) => setPostCategory(e.target.value)} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm">{SERVICE_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}</select>
+                 ) : (
+                   <>
+                     <select value={postCategory} onChange={(e) => { setPostCategory(e.target.value); const opts = typesForCategory(e.target.value); setPostType(opts[0]); }} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm">{sysSettings.categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}</select>
+                     <select value={postType} onChange={(e) => setPostType(e.target.value)} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm">{typesForCategory(postCategory).map(t => <option key={t} value={t}>{t}</option>)}</select>
+                   </>
+                 )}
+               </div>
+               <div className="flex gap-3">
+                 <input type="number" value={postPrice} onChange={(e) => setPostPrice(e.target.value)} placeholder={postKind === 'service' ? 'Price (₹)' : 'Rent (₹)/Month'} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
+                 <input type="tel" inputMode="numeric" maxLength={10} value={postMobile} onChange={(e) => setPostMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Mobile No." className="flex-[1.5] min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
+               </div>
+               <p className="text-[10px] font-bold text-gray-400 ml-1">Mobile signup/profile se prefill hai — chaahein toh badal ya hata kar naya number daalein.</p>
+             </div>
+             {postKind === 'service' ? (
+               <div>
+                 <p className="text-xs font-black text-gray-500 mb-2 uppercase">Service Details</p>
+                 <textarea value={postDesc} onChange={(e) => setPostDesc(e.target.value)} rows={3} placeholder="Kya service dete hain, timing, monthly rate, delivery area..." className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm resize-none" />
+               </div>
+             ) : (
+               <div><p className="text-xs font-black text-gray-500 mb-2 uppercase">Select Facilities</p><div className="flex flex-wrap gap-2">{(sysSettings.facilities || []).map(fac => (<button type="button" key={fac} onClick={() => setSelectedFacilities(prev => prev.includes(fac) ? prev.filter(f => f !== fac) : [...prev, fac])} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${selectedFacilities.includes(fac) ? 'bg-brand text-white border-brand shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>{fac}</button>))}</div></div>
+             )}
+              <div className="flex flex-wrap gap-2 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 min-w-[140px] p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button onClick={refreshGpsPin} disabled={isLocating} title="GPS se refresh" className="p-3 shrink-0 rounded-2xl font-black text-xs flex items-center justify-center border-2 bg-gray-50 text-gray-600 border-gray-200 active:scale-95 disabled:opacity-60">{isLocating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button><button onClick={startPickingLocation} className={`p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLng ? 'bg-green-50 text-green-600 border-green-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={16}/> {postLng ? (gpsAccuracy ? `Pinned! ±${gpsAccuracy}m` : 'Pinned!') : 'Map'}</button><button onClick={openPoiPicker} className="p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={16} /> Nearby</button></div>
               <div>
                 <input type="url" value={postMapUrl} onChange={(e) => setPostMapUrl(e.target.value)} placeholder="Google Maps link (optional)" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm" />
                 <p className="text-[10px] font-bold text-gray-400 mt-1 ml-1">Google Maps par apni jagah kholo → Share link → yahan paste karo. Location isi link se set hogi (zyada accurate).</p>
@@ -1440,7 +1543,7 @@ export default function MainApp() {
           </div>
           <div className="p-4 border-t bg-white sticky bottom-0 z-10">
              <button onClick={initiatePayment} disabled={isSubmitting} className={`w-full py-4 rounded-2xl font-black text-lg shadow-lg flex items-center justify-center gap-2 ${adType === 'promo' ? 'bg-orange-500 text-white' : 'bg-brand text-white'}`}>
-                {isSubmitting ? (<><Loader2 size={20} className="animate-spin" /> Publishing…</>) : (getPayAmount() === '0' || getPayAmount() === '' ? 'Publish Ad (Free)' : `Pay ₹${getPayAmount()} & Publish`)}
+                {isSubmitting ? (<><Loader2 size={20} className="animate-spin" /> Publishing…</>) : (getPayAmount() === '0' || getPayAmount() === '' ? (postKind === 'service' ? 'Publish Service Ad (Free)' : 'Publish Ad (Free)') : `Pay ₹${getPayAmount()} & Publish`)}
              </button>
              {isSubmitting && !showPaymentWindow && (<button onClick={cancelSubmit} className="w-full mt-2 text-red-600 font-black text-sm underline">Submit cancel karein</button>)}
           </div>

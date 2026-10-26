@@ -34,6 +34,7 @@ export default function UserDashboard() {
   // ⚙️ Settings panel states
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
   const [oldPw, setOldPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [savingName, setSavingName] = useState(false); // P2 #48: save loading states
@@ -41,8 +42,16 @@ export default function UserDashboard() {
   const [newEmail, setNewEmail] = useState('');
   const [emailPw, setEmailPw] = useState('');
   const [savingEmail, setSavingEmail] = useState(false);
-  const [delPw, setDelPw] = useState('');
+  const [emailOtp, setEmailOtp] = useState('');
+  const [emailStep, setEmailStep] = useState('request');
+  const [emailInfo, setEmailInfo] = useState('');
+  const [emailCooldown, setEmailCooldown] = useState(0);
   const [delConfirm, setDelConfirm] = useState('');
+  const [delOtp, setDelOtp] = useState('');
+  const [delOtpSent, setDelOtpSent] = useState(false);
+  const [delInfo, setDelInfo] = useState('');
+  const [sendingDelOtp, setSendingDelOtp] = useState(false);
+  const [delCooldown, setDelCooldown] = useState(0);
   const [deletingAcc, setDeletingAcc] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   // Pehli load par skeleton dikhao (fetch complete hote hi hatेगा)
@@ -74,6 +83,18 @@ export default function UserDashboard() {
   // ❤️ Saved ads (favorites) + unsave
   const [savedRooms, setSavedRooms] = useState([]);
   const unsaveBusyRef = useRef(new Set()); // P2 #47: double-tap guard (toggle wapas save kar deta tha)
+
+  useEffect(() => {
+    if (emailCooldown <= 0) return undefined;
+    const t = setInterval(() => setEmailCooldown((c) => c - 1), 1000);
+    return () => clearInterval(t);
+  }, [emailCooldown]);
+
+  useEffect(() => {
+    if (delCooldown <= 0) return undefined;
+    const t = setInterval(() => setDelCooldown((c) => c - 1), 1000);
+    return () => clearInterval(t);
+  }, [delCooldown]);
 
   const fetchSaved = () => {
     apiFetch(`${BASE_URL}/api/users/favorites`, { headers: authHeaders() })
@@ -252,13 +273,17 @@ export default function UserDashboard() {
   // ⚙️ Settings: naam + password save
   const saveProfileName = async () => {
     if (!editName.trim()) return alert('Naam khaali nahi ho sakta.');
+    const phone = String(editPhone || '').replace(/\D/g, '');
+    if (editPhone.trim() && !/^[6-9]\d{9}$/.test(phone)) return alert('Sahi 10-digit mobile number dalein.');
     if (savingName) return; // P2 #48: double-tap guard
     setSavingName(true);
     try {
+      const body = { name: editName.trim() };
+      if (phone) body.phone = phone;
       const res = await apiFetch(`${BASE_URL}/api/users/profile`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ name: editName.trim() })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       alert(data.message);
@@ -290,32 +315,80 @@ export default function UserDashboard() {
     setSavingPw(false);
   };
 
-  // 📧 P2 #48: Email change — password confirm (Google-only account me BE saaf mana karta hai)
-  const changeEmail = async () => {
+  // 📧 Email change: nayi email par OTP verify hone ke baad hi update
+  const requestEmailOtp = async () => {
     if (!newEmail.trim() || !emailPw) return alert('Naya email aur password dono daliye.');
     if (savingEmail) return;
     setSavingEmail(true);
+    setEmailInfo('');
     try {
-      const res = await apiFetch(`${BASE_URL}/api/users/change-email`, {
+      const res = await apiFetch(`${BASE_URL}/api/users/change-email/request-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ newEmail: newEmail.trim(), password: emailPw })
       });
       const data = await res.json();
-      alert(data.message);
+      if (data.success) {
+        setEmailStep('verify');
+        setEmailOtp('');
+        setEmailInfo(data.message || 'Nayi email par OTP bhej diya gaya hai.');
+        setEmailCooldown(60);
+      } else alert(data.message || 'OTP bhejne me dikkat aayi.');
+    } catch { alert('Server connection failed.'); }
+    setSavingEmail(false);
+  };
+
+  const verifyEmailChange = async () => {
+    if (!/^\d{6}$/.test(emailOtp.trim())) return alert('6-digit OTP dalein.');
+    if (savingEmail) return;
+    setSavingEmail(true);
+    try {
+      const res = await apiFetch(`${BASE_URL}/api/users/change-email/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ newEmail: newEmail.trim(), otp: emailOtp.trim() })
+      });
+      const data = await res.json();
       if (data.success && data.user) {
         const merged = { ...currentUser, ...data.user };
         setCurrentUser(merged);
         localStorage.setItem('roomkhojo_user', JSON.stringify(merged));
-        setNewEmail(''); setEmailPw('');
+        if (data.token) localStorage.setItem('roomkhojo_token', data.token);
+        alert(data.message || 'Email update ho gaya!');
+        setNewEmail(''); setEmailPw(''); setEmailOtp(''); setEmailInfo(''); setEmailStep('request');
+      } else {
+        alert(data.message || 'OTP verify nahi hua.');
       }
     } catch { alert('Server connection failed.'); }
     setSavingEmail(false);
   };
 
-  // 🗑️ P2 #48: Account delete — DELETE type + confirm + password (agar hai)
+  // 🗑️ Account delete: current email par OTP verify hone ke baad hi delete
+  const requestDeleteOtp = async () => {
+    if (delConfirm.trim().toUpperCase() !== 'DELETE') return alert('Pehle confirm box me DELETE likho.');
+    if (sendingDelOtp) return;
+    setSendingDelOtp(true);
+    setDelInfo('');
+    try {
+      const res = await apiFetch(`${BASE_URL}/api/users/delete-account/request-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ confirm: 'DELETE' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDelOtpSent(true);
+        setDelOtp('');
+        setDelInfo(data.message || 'Email par OTP bhej diya gaya hai.');
+        setDelCooldown(60);
+      } else alert(data.message || 'OTP bhejne me dikkat aayi.');
+    } catch { alert('Server connection failed.'); }
+    setSendingDelOtp(false);
+  };
+
   const deleteAccount = async () => {
     if (delConfirm.trim().toUpperCase() !== 'DELETE') return alert('Confirm box me DELETE likho — tabhi delete hoga.');
+    if (!/^\d{6}$/.test(delOtp.trim())) return alert('Email par aaya 6-digit OTP dalein.');
     if (!window.confirm('Pakka? Account + SAARE ads hamesha ke liye delete ho jayenge. Ye undo NAHI hota.')) return;
     if (deletingAcc) return;
     setDeletingAcc(true);
@@ -323,7 +396,7 @@ export default function UserDashboard() {
       const res = await apiFetch(`${BASE_URL}/api/users/delete-account`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ confirm: 'DELETE', password: delPw })
+        body: JSON.stringify({ confirm: 'DELETE', otp: delOtp.trim() })
       });
       const data = await res.json();
       alert(data.message);
@@ -342,7 +415,7 @@ export default function UserDashboard() {
     <div className="h-[100dvh] w-full bg-gray-50 flex flex-col font-sans">
       <header className="bg-brand text-white p-6 rounded-b-[40px] shadow-lg relative shrink-0">
         <button onClick={() => navigate('/')} className="absolute top-6 left-6 p-2 bg-white/20 rounded-full active:scale-95 transition-transform"><ArrowLeft size={20}/></button>
-        <button onClick={() => { setEditName(currentUser?.name || ''); setOldPw(''); setNewPw(''); setSettingsOpen(true); }} className="absolute top-6 right-6 p-2 bg-white/20 rounded-full active:scale-95 transition-transform"><Settings size={20}/></button>
+        <button onClick={() => { setEditName(currentUser?.name || ''); setEditPhone(currentUser?.phone || ''); setOldPw(''); setNewPw(''); setEmailStep('request'); setEmailOtp(''); setEmailInfo(''); setDelOtpSent(false); setDelOtp(''); setDelInfo(''); setSettingsOpen(true); }} className="absolute top-6 right-6 p-2 bg-white/20 rounded-full active:scale-95 transition-transform"><Settings size={20}/></button>
         <div className="flex flex-col items-center mt-6">
           {currentUser?.pic ? ( <img src={currentUser.pic} alt="Profile" className="w-24 h-24 rounded-full border-4 border-white shadow-xl mb-4 object-cover" /> ) : ( <div className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center border-4 border-white shadow-xl mb-4"><User size={40}/></div> )}
           <h1 className="text-2xl font-black">Welcome, {currentUser?.name?.split(' ')[0] || 'User'}</h1>
@@ -536,34 +609,57 @@ export default function UserDashboard() {
             <div className="p-5 overflow-y-auto space-y-5 flex-1">
               <div className="flex items-center gap-3 bg-gray-50 p-4 rounded-2xl border">
                 {currentUser?.pic ? (<img src={currentUser.pic} alt="Profile" className="w-14 h-14 rounded-full object-cover border-2 border-white shadow shrink-0" />) : (<div className="w-14 h-14 bg-brand/10 rounded-full flex items-center justify-center text-brand shrink-0"><User size={28}/></div>)}
-                <div className="min-w-0"><p className="font-black text-gray-800 truncate">{currentUser?.name || 'User'}</p><p className="text-xs font-bold text-gray-500 truncate">{currentUser?.email || ''}</p></div>
+                <div className="min-w-0"><p className="font-black text-gray-800 truncate">{currentUser?.name || 'User'}</p><p className="text-xs font-bold text-gray-500 truncate">{currentUser?.email || ''}</p>{currentUser?.phone && (<p className="text-xs font-bold text-gray-400">{currentUser.phone}</p>)}</div>
               </div>
               <div>
-                <p className="text-xs font-black text-gray-500 mb-2 uppercase">Display Name</p>
-                <div className="flex gap-2"><input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Apna naam" className="flex-1 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveProfileName} disabled={savingName} className="bg-slate-900 text-white px-4 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingName ? '…' : 'Save'}</button></div>
+                <p className="text-xs font-black text-gray-500 mb-2 uppercase">Profile</p>
+                <div className="space-y-2">
+                  <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Apna naam" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
+                  <div className="flex gap-2"><input type="tel" inputMode="numeric" maxLength={10} value={editPhone} onChange={(e) => setEditPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Mobile number (listing me prefill hoga)" className="flex-1 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveProfileName} disabled={savingName} className="bg-slate-900 text-white px-4 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingName ? '…' : 'Save'}</button></div>
+                </div>
               </div>
               <div>
                 <p className="text-xs font-black text-gray-500 mb-2 uppercase">Password Badlo</p>
                 <div className="space-y-2"><input type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} placeholder="Puraana password" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="Naya password (min 8)" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveNewPassword} disabled={savingPw} className="w-full bg-blue-600 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingPw ? 'Update ho raha hai…' : 'Update Password'}</button></div>
                 <p className="text-[11px] font-bold text-gray-400 mt-2">Google se login karte ho? Toh password hai hi nahi — seedha logout/login karo.</p>
+                <button onClick={() => { setSettingsOpen(false); navigate(`/forgot-password?email=${encodeURIComponent(currentUser?.email || '')}`); }} className="mt-2 text-xs font-black text-brand hover:underline">Password bhool gaye? Email OTP se reset karein</button>
               </div>
-              {/* 📧 P2 #48: Email change — password confirm zaroori */}
+              {/* 📧 Email change — nayi email par OTP verify */}
               <div>
                 <p className="text-xs font-black text-gray-500 mb-2 uppercase">Email Badlo</p>
-                <div className="space-y-2">
-                  <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="Naya email address" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
-                  <input type="password" value={emailPw} onChange={(e) => setEmailPw(e.target.value)} placeholder="Confirm karne ke liye password" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
-                  <button onClick={changeEmail} disabled={savingEmail} className="w-full bg-slate-700 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingEmail ? 'Update ho raha hai…' : 'Email Update Karein'}</button>
-                </div>
+                {emailStep === 'request' ? (
+                  <div className="space-y-2">
+                    <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="Naya email address" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
+                    <input type="password" value={emailPw} onChange={(e) => setEmailPw(e.target.value)} placeholder="Confirm karne ke liye password" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
+                    <button onClick={requestEmailOtp} disabled={savingEmail} className="w-full bg-slate-700 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingEmail ? 'OTP bhej rahe hain…' : 'Nayi Email par OTP Bhejein'}</button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl p-2.5">{emailInfo || 'OTP nayi email par bheja gaya hai.'}</p>
+                    <input type="text" inputMode="numeric" maxLength={6} value={emailOtp} onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit OTP" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
+                    <button onClick={verifyEmailChange} disabled={savingEmail} className="w-full bg-slate-700 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingEmail ? 'Verify ho raha hai…' : 'Verify & Update Email'}</button>
+                    <div className="flex items-center justify-between">
+                      <button onClick={() => { setEmailStep('request'); setEmailOtp(''); setEmailInfo(''); }} className="text-[11px] font-bold text-gray-500 hover:text-brand">Email badlein</button>
+                      <button onClick={requestEmailOtp} disabled={emailCooldown > 0 || savingEmail} className="text-[11px] font-bold text-brand hover:underline disabled:text-gray-400 disabled:no-underline">{emailCooldown > 0 ? `Resend ${emailCooldown}s` : 'Resend OTP'}</button>
+                    </div>
+                  </div>
+                )}
               </div>
               {/* 🗑️ P2 #48: Danger zone — account delete (DELETE type + confirm) */}
               <div className="border border-red-100 bg-red-50/60 rounded-2xl p-4">
                 <p className="text-xs font-black text-red-600 mb-2 uppercase flex items-center gap-1"><AlertTriangle size={13} /> Danger Zone — Account Delete</p>
                 <p className="text-[11px] font-bold text-red-500 mb-3">Account ke saath aapke SAARE ads bhi hamesha ke liye delete ho jayenge. Ye undo nahi hota.</p>
                 <div className="space-y-2">
-                  <input type="password" value={delPw} onChange={(e) => setDelPw(e.target.value)} placeholder="Password (agar hai)" className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border border-red-200" />
                   <input type="text" value={delConfirm} onChange={(e) => setDelConfirm(e.target.value)} placeholder='Confirm ke liye "DELETE" likho' className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border border-red-200" />
-                  <button onClick={deleteAccount} disabled={deletingAcc} className="w-full bg-red-600 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{deletingAcc ? 'Delete ho raha hai…' : 'Account Hamesha Ke Liye Delete Karein'}</button>
+                  <button onClick={requestDeleteOtp} disabled={sendingDelOtp || delOtpSent} className="w-full bg-white text-red-600 border border-red-300 py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{sendingDelOtp ? 'OTP bhej rahe hain…' : delOtpSent ? 'OTP bhej diya gaya' : 'Email par OTP Bhejein'}</button>
+                  {delOtpSent && (
+                    <>
+                      <p className="text-[11px] font-bold text-red-600">{delInfo || 'Current email par OTP bheja gaya hai.'}</p>
+                      <input type="text" inputMode="numeric" maxLength={6} value={delOtp} onChange={(e) => setDelOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit OTP" className="w-full p-3 bg-white rounded-xl outline-none font-bold text-sm border border-red-200" />
+                      <button onClick={requestDeleteOtp} disabled={delCooldown > 0 || sendingDelOtp} className="text-[11px] font-bold text-red-500 hover:underline disabled:text-gray-400 disabled:no-underline">{delCooldown > 0 ? `Resend ${delCooldown}s` : 'Resend OTP'}</button>
+                    </>
+                  )}
+                  <button onClick={deleteAccount} disabled={deletingAcc || !delOtpSent} className="w-full bg-red-600 text-white py-3 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{deletingAcc ? 'Delete ho raha hai…' : 'Account Hamesha Ke Liye Delete Karein'}</button>
                 </div>
               </div>
             </div>
