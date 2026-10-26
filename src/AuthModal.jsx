@@ -1,17 +1,48 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
-import { AlertCircle, Loader2, Lock, Mail, Phone, ShieldCheck, User, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Camera, CheckCircle2, LifeBuoy, Loader2, Lock, Mail, Phone, ShieldCheck, User, X } from 'lucide-react';
 import { apiFetch } from './apiFetch';
 import AuthField, { PasswordToggle } from './AuthField';
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-api.onrender.com').replace(/\/api\/?$/, '');
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-backend.vercel.app').replace(/\/api\/?$/, '');
 const GOOGLE_ENABLED = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
 const COPY = {
   login: { title: 'Sign in', subtitle: 'Welcome back — apna account access karein.', cta: 'Sign in' },
   signup: { title: 'Create account', subtitle: 'Free account banayein aur apna ad post karein.', cta: 'Create account' },
 };
+
+const AUTH_ISSUES = [
+  { id: 'login', label: 'Login nahi ho raha' },
+  { id: 'signup', label: 'Sign up nahi ho raha' },
+  { id: 'otp', label: 'OTP nahi aa raha / galat' },
+  { id: 'google', label: 'Google sign-in issue' },
+  { id: 'other', label: 'Kuch aur account issue' },
+];
+
+const compressScreenshot = (file, maxDim = 1400, quality = 0.8) => new Promise((resolve) => {
+  try {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      try {
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob || blob.size >= file.size) return resolve(file);
+          resolve(new File([blob], (file.name || 'screenshot').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }));
+        }, 'image/jpeg', quality);
+      } catch { resolve(file); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  } catch { resolve(file); }
+});
 
 export default function AuthModal({ mode = 'login', onClose, onModeChange, onAuthed }) {
   const navigate = useNavigate();
@@ -28,6 +59,18 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
   const [hint, setHint] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpIssue, setHelpIssue] = useState('login');
+  const [helpMessage, setHelpMessage] = useState('');
+  const [helpEmail, setHelpEmail] = useState('');
+  const [helpPhone, setHelpPhone] = useState('');
+  const [helpPhoto, setHelpPhoto] = useState(null);
+  const [helpPhotoUrl, setHelpPhotoUrl] = useState('');
+  const [helpPhotoBusy, setHelpPhotoBusy] = useState(false);
+  const [helpBusy, setHelpBusy] = useState(false);
+  const [helpError, setHelpError] = useState('');
+  const [helpSent, setHelpSent] = useState(false);
+  const [helpTicketId, setHelpTicketId] = useState('');
   const hintTimer = useRef(null);
   const termsRef = useRef(null);
   const dialogRef = useRef(null);
@@ -46,6 +89,10 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
   };
 
   useEffect(() => () => clearTimeout(hintTimer.current), []);
+
+  useEffect(() => () => {
+    if (helpPhotoUrl) URL.revokeObjectURL(helpPhotoUrl);
+  }, [helpPhotoUrl]);
 
   useEffect(() => {
     if (cooldown <= 0) return undefined;
@@ -94,6 +141,89 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
   const cleanPhone = (raw) => {
     const digits = String(raw || '').replace(/\D/g, '');
     return digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits;
+  };
+
+  const openHelp = () => {
+    setHelpIssue(mode === 'signup' ? (signupStep === 'otp' ? 'otp' : 'signup') : 'login');
+    setHelpMessage(error ? `Error: ${error}\n` : '');
+    setHelpEmail(email.trim());
+    setHelpPhone(cleanPhone(phone));
+    setHelpError('');
+    setHelpSent(false);
+    setHelpTicketId('');
+    setHelpPhoto(null);
+    setHelpPhotoUrl('');
+    setHelpOpen(true);
+  };
+
+  const pickHelpPhoto = async (e) => {
+    const file = (e.target.files || [])[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/^image\/(jpe?g|png|webp)$/.test(file.type)) {
+      setHelpError('Sirf JPG, PNG ya WebP screenshot allowed hai.');
+      return;
+    }
+    setHelpPhotoBusy(true);
+    setHelpError('');
+    try {
+      const compressed = await compressScreenshot(file);
+      if (compressed.size > 2 * 1024 * 1024) {
+        setHelpError('Screenshot 2MB se chhoti honi chahiye. Chhota screenshot try karein.');
+        return;
+      }
+      if (helpPhotoUrl) URL.revokeObjectURL(helpPhotoUrl);
+      setHelpPhoto(compressed);
+      setHelpPhotoUrl(URL.createObjectURL(compressed));
+    } finally {
+      setHelpPhotoBusy(false);
+    }
+  };
+
+  const removeHelpPhoto = () => {
+    if (helpPhotoUrl) URL.revokeObjectURL(helpPhotoUrl);
+    setHelpPhoto(null);
+    setHelpPhotoUrl('');
+  };
+
+  const submitHelp = async (e) => {
+    e.preventDefault();
+    if (helpMessage.trim().length < 10) return setHelpError('Dikkat thode detail me likhein (min 10 characters).');
+    const helpEmailClean = helpEmail.trim();
+    const helpPhoneClean = cleanPhone(helpPhone);
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(helpEmailClean);
+    if (!emailOk && !/^[6-9]\d{9}$/.test(helpPhoneClean)) {
+      return setHelpError('Reply ke liye sahi email ya 10-digit mobile number dalein.');
+    }
+    setHelpBusy(true);
+    setHelpError('');
+    try {
+      const fd = new FormData();
+      fd.append('issueType', helpIssue);
+      fd.append('message', helpMessage.trim());
+      fd.append('contactEmail', helpEmailClean);
+      fd.append('contactPhone', helpPhoneClean);
+      if (helpPhoto) fd.append('images', helpPhoto);
+      const res = await apiFetch(`${BASE_URL}/api/support/auth-help`, {
+        method: 'POST',
+        body: fd,
+        signal: AbortSignal.timeout(60000),
+      });
+      let data = {};
+      try { data = await res.json(); } catch { data = {}; }
+      if (data.success) {
+        setHelpSent(true);
+        setHelpTicketId(data.ticket && data.ticket._id ? String(data.ticket._id) : '');
+        setHelpPhoto(null);
+        setHelpPhotoUrl('');
+      } else {
+        setHelpError(data.message || `Report bhej nahi paye (server ${res.status}). Dobara try karein.`);
+      }
+    } catch {
+      setHelpError('Server se connection nahi bana. Internet check karke dobara try karein.');
+    } finally {
+      setHelpBusy(false);
+    }
   };
 
   const signupBody = () => ({
@@ -236,7 +366,7 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={copy.title}
+        aria-label={helpOpen ? 'Account help' : copy.title}
         className="relative w-full max-h-[94dvh] overflow-y-auto rounded-t-[28px] border border-gray-100 bg-white shadow-2xl sm:max-w-[420px] sm:rounded-[28px] rk-sheet-in"
       >
         <div className="p-6 sm:p-7">
@@ -251,7 +381,7 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
                 <p className="text-sm font-extrabold tracking-tight text-gray-800">
                   Room<span className="text-brand">Khojo</span>
                 </p>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Secure account</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{helpOpen ? 'Troubleshooting' : 'Secure account'}</p>
               </div>
             </div>
             <button
@@ -263,10 +393,10 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
             </button>
           </div>
 
-          <h2 className="mt-6 text-2xl font-extrabold tracking-tight text-gray-900">{copy.title}</h2>
-          <p className="mt-1 text-sm font-semibold text-gray-500">{copy.subtitle}</p>
+          <h2 className="mt-6 text-2xl font-extrabold tracking-tight text-gray-900">{helpOpen ? 'Account help' : copy.title}</h2>
+          <p className="mt-1 text-sm font-semibold text-gray-500">{helpOpen ? 'Login/signup me dikkat? Admin ko error aur screenshot bhejein.' : copy.subtitle}</p>
 
-          {!(mode === 'signup' && signupStep === 'otp') && (
+          {!helpOpen && !(mode === 'signup' && signupStep === 'otp') && (
           <div className="mt-5 grid grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1">
             {[
               { id: 'login', label: 'Sign in' },
@@ -284,13 +414,142 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
           </div>
           )}
 
-          {error && (
+          {!helpOpen && error && (
             <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700">
               <AlertCircle size={16} className="mt-0.5 shrink-0" />
               <p className="text-xs font-bold leading-relaxed">{error}</p>
             </div>
           )}
 
+          {helpOpen ? (
+            helpSent ? (
+              <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
+                  <CheckCircle2 size={26} />
+                </div>
+                <h3 className="mt-3 text-lg font-extrabold text-emerald-900">Report admin ko bhej di gayi</h3>
+                <p className="mt-1 text-xs font-semibold leading-relaxed text-emerald-800">
+                  Admin aapke email/mobile par contact karke problem solve karega. Details aur screenshot (agar lagaya ho) ticket ke saath chali gayi hain.
+                </p>
+                {helpTicketId && (
+                  <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-[10px] font-bold text-emerald-700">
+                    Report ID: {helpTicketId.slice(-8).toUpperCase()}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setHelpOpen(false); setHelpSent(false); }}
+                  className="mt-4 h-11 w-full rounded-xl bg-emerald-700 text-sm font-extrabold text-white active:scale-[0.99]"
+                >
+                  Wapas Sign in par
+                </button>
+                <button type="button" onClick={onClose} className="mt-2 text-xs font-bold text-emerald-700 underline">
+                  Band karein
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={submitHelp} noValidate className="mt-5 space-y-3.5">
+                <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+                  <LifeBuoy size={20} className="mt-0.5 shrink-0 text-blue-600" />
+                  <p className="text-[11px] font-semibold leading-relaxed text-blue-800">
+                    Login ya account banane me dikkat aa rahi hai? Yahan detail aur screenshot bhejein — admin panel me ticket turant chala jayega.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-extrabold text-gray-700">Kya dikkat aa rahi hai?</label>
+                  <select
+                    value={helpIssue}
+                    onChange={(e) => setHelpIssue(e.target.value)}
+                    className="h-12 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-bold text-gray-800 outline-none focus:border-brand"
+                  >
+                    {AUTH_ISSUES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                </div>
+
+                <AuthField
+                  label="Email (reply ke liye)"
+                  icon={Mail}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  value={helpEmail}
+                  onChange={(e) => setHelpEmail(e.target.value)}
+                  disabled={helpBusy}
+                />
+                <AuthField
+                  label="Mobile (optional)"
+                  icon={Phone}
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  placeholder="10-digit mobile"
+                  value={helpPhone}
+                  onChange={(e) => { const d = e.target.value.replace(/\D/g, ''); setHelpPhone((d.length > 10 && d.startsWith('91') ? d.slice(2, 12) : d).slice(0, 10)); }}
+                  disabled={helpBusy}
+                />
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-extrabold text-gray-700">Dikkat detail me</label>
+                  <textarea
+                    value={helpMessage}
+                    onChange={(e) => setHelpMessage(e.target.value.slice(0, 2000))}
+                    rows={4}
+                    placeholder="Kaunsa step par atka? Kya error dikh raha hai? OTP aa raha hai ya nahi?"
+                    className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm font-bold text-gray-800 outline-none focus:border-brand resize-none"
+                  />
+                  <p className="mt-1 text-right text-[10px] font-bold text-gray-400">{helpMessage.length}/2000</p>
+                </div>
+
+                <div>
+                  {helpPhotoUrl && (
+                    <div className="relative mb-2 w-32">
+                      <img src={helpPhotoUrl} className="h-24 w-32 rounded-xl border border-gray-200 object-cover" alt="Screenshot preview" />
+                      <button
+                        type="button"
+                        onClick={removeHelpPhoto}
+                        className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-xs font-black text-white shadow"
+                        aria-label="Screenshot remove"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+                  <label className="flex h-16 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-brand/30 bg-brand/5 text-xs font-bold text-brand">
+                    <Camera size={20} />
+                    {helpPhotoBusy ? 'Screenshot optimize ho raha hai…' : helpPhoto ? 'Screenshot badlein' : 'Screenshot lagayein (optional)'}
+                    <input type="file" className="hidden" accept="image/jpeg,image/png,image/webp" onChange={pickHelpPhoto} disabled={helpPhotoBusy || helpBusy} />
+                  </label>
+                </div>
+
+                {helpError && (
+                  <div className="flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700">
+                    <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                    <p className="text-xs font-bold leading-relaxed">{helpError}</p>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={helpBusy || helpPhotoBusy}
+                  className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand text-sm font-extrabold text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                >
+                  {helpBusy && <Loader2 size={17} className="animate-spin" />}
+                  {helpBusy ? 'Admin ko bhej rahe hain…' : 'Report admin ko bhejein'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen(false)}
+                  className="flex h-10 w-full items-center justify-center gap-1.5 text-xs font-bold text-gray-500 hover:text-brand"
+                >
+                  <ArrowLeft size={14} /> Wapas Sign in/Sign up
+                </button>
+              </form>
+            )
+          ) : (
+          <>
           {mode === 'signup' && signupStep === 'otp' ? (
             <form onSubmit={verifySignupOtp} className="mt-5 space-y-3.5">
               <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
@@ -440,6 +699,17 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
           </form>
           )}
 
+          <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50/60 p-3 text-center">
+            <p className="text-[11px] font-semibold text-gray-500">Account nahi ban raha ya login nahi ho raha?</p>
+            <button
+              type="button"
+              onClick={openHelp}
+              className="mt-1.5 inline-flex items-center justify-center gap-1.5 text-xs font-extrabold text-brand hover:underline"
+            >
+              <LifeBuoy size={14} /> Troubleshooting — admin ko report karein
+            </button>
+          </div>
+
           {GOOGLE_ENABLED && !(mode === 'signup' && signupStep === 'otp') && (
             <>
               <div className="my-4 flex items-center gap-3">
@@ -486,6 +756,8 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
               {mode === 'login' ? 'Sign up' : 'Sign in'}
             </button>
           </p>
+          )}
+          </>
           )}
         </div>
       </div>

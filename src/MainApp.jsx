@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { jwtDecode } from 'jwt-decode';
 import * as maplibregl from 'maplibre-gl'; // v6 ESM-only: namespace import (default import hata)
@@ -7,6 +7,7 @@ import { X, Phone, MessageCircle, Map as MapIcon, List, Plus, Camera, Target, In
 import { markerIcon, ICON_STAR } from './markerIcons';
 import AuthModal from './AuthModal';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (sab calls)
+import { safeImageUrl, safeMapUrl, directionsUrl, telUrl, whatsappUrl, upiUrl, phoneDigits } from './safeUrl';
 
 // Effective-featured: promo + expiry valid ho tabhi orange STAR,
 // expire ho chuka toh NORMAL green (ad gayab nahi hota).
@@ -15,10 +16,10 @@ const isFeatured = (room) => room
   && (!room.expiryDate || new Date(room.expiryDate) > new Date());
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-api.onrender.com'; // P2 #58: sirf trailing /api strip
+const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-backend.vercel.app'; // P2 #58: sirf trailing /api strip
 const API_URL = `${BASE_URL}/api/rooms`;
 const ADMIN_API = `${BASE_URL}/api/admin`; 
-const getImageUrl = (path) => !path ? 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=400&q=80' : path.startsWith('http') ? path : `${BASE_URL}${path}`;
+const getImageUrl = (path) => safeImageUrl(path);
 
 // UPI note ke liye local code (asli paymentCode server banata hai)
 const makePayCode = () => 'RK-' + Math.random().toString(36).substr(2, 5).toUpperCase();
@@ -81,6 +82,21 @@ const SAT_STYLE = {
     }
   },
   layers: [{ id: 'esriSat', type: 'raster', source: 'esriSat' }]
+};
+
+const DEFAULT_MAP_CENTER = [74.3218, 29.5894];
+const readCachedRooms = () => {
+  try {
+    const cached = JSON.parse(localStorage.getItem('roomkhojo_rooms_cache') || 'null');
+    return Array.isArray(cached) ? cached : [];
+  } catch { return []; }
+};
+const readSavedMapCenter = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem('roomkhojo_last_location') || 'null');
+    if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lng)) return [saved.lng, saved.lat];
+  } catch { /* default center */ }
+  return DEFAULT_MAP_CENTER;
 };
 
   // 💰 "₹5,500" → 5500 (filter/sort ke liye)
@@ -175,6 +191,7 @@ export default function MainApp() {
   const navigate = useNavigate();
   const mapContainer = useRef(null); 
   const map = useRef(null); 
+  const mapUserMovedRef = useRef(false);
   const markersRef = useRef([]);
   const userLocMarkerRef = useRef(null); 
   const submitLockRef = useRef(false); // 🚫 double-submit guard (duplicate ads rokne ke liye)
@@ -213,7 +230,8 @@ export default function MainApp() {
   const [bannerRooms, setBannerRooms] = useState([]);
   const [bannerIndex, setBannerIndex] = useState(0);
   const [wantBanner, setWantBanner] = useState(false);
-  const [rooms, setRooms] = useState([]);
+  const [rooms, setRooms] = useState(readCachedRooms);
+  const [roomsLoading, setRoomsLoading] = useState(() => rooms.length === 0);
   const [searchQuery, setSearchQuery] = useState(() => initialParams.get('q') || ''); 
   
   const [isMenuOpen, setIsMenuOpen] = useState(false); 
@@ -283,8 +301,10 @@ export default function MainApp() {
   const [isCompressingPhotos, setIsCompressingPhotos] = useState(false); // P2 #37: compress ke dauran UI feedback
   const [postLng, setPostLng] = useState(null);
   const [postLat, setPostLat] = useState(null); 
+  const [postLocationConfirmed, setPostLocationConfirmed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [payRef, setPayRef] = useState('');
+  const [payRefError, setPayRefError] = useState('');
   // 📍 POI picker states
   const [poiOpen, setPoiOpen] = useState(false);
   const [poiLoading, setPoiLoading] = useState(false);
@@ -383,12 +403,11 @@ export default function MainApp() {
       })
       .catch(() => {
         // P1 #33/#34: pehle cached list try karo (offline-friendly), warna error card
-        try {
-          const cached = JSON.parse(localStorage.getItem('roomkhojo_rooms_cache') || 'null');
-          if (Array.isArray(cached) && cached.length > 0) { setRooms(cached); setRoomsError(false); }
-          else setRoomsError(true);
-        } catch { setRoomsError(true); }
-      });
+        const cached = readCachedRooms();
+        if (cached.length > 0) { setRooms(cached); setRoomsError(false); }
+        else setRoomsError(true);
+      })
+      .finally(() => setRoomsLoading(false));
     apiFetch(`${ADMIN_API}/settings`)
       .then(res => res.json())
       .then(data => {
@@ -522,7 +541,7 @@ export default function MainApp() {
   };
 
   // 📍 Blue dot marker create/update (guarded — map null ho toh crash nahi; P1 #27/#29)
-  const updateUserMarker = (latitude, longitude) => {
+  const updateUserMarker = useCallback((latitude, longitude) => {
     if (!map.current) return;
     if (userLocMarkerRef.current) {
       userLocMarkerRef.current.setLngLat([longitude, latitude]);
@@ -530,7 +549,7 @@ export default function MainApp() {
     }
     const el = document.createElement('div'); el.className = 'w-5 h-5 bg-blue-500 border-[3px] border-white rounded-full shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-pulse';
     userLocMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([longitude, latitude]).addTo(map.current);
-  };
+  }, []);
 
   const handleLiveLocation = (sharp = false) => {
     if (navigator.geolocation) {
@@ -573,7 +592,7 @@ export default function MainApp() {
       setIsLocating(false);
       setGpsAccuracy(acc);
       if (acc > 150) { setShowLocationWarning(true); return; }
-      setPostLng(pos.coords.longitude); setPostLat(pos.coords.latitude);
+      setPostLng(pos.coords.longitude); setPostLat(pos.coords.latitude); setPostLocationConfirmed(true);
       updateUserMarker(pos.coords.latitude, pos.coords.longitude);
       reverseGeocode(pos.coords.latitude, pos.coords.longitude); // P1 #25
       if (map.current) map.current.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
@@ -601,7 +620,7 @@ export default function MainApp() {
       try {
         const res = await apiFetch(`${BASE_URL}/api/geo/search?q=${encodeURIComponent(searchQuery.trim())}`); const data = await res.json();
         const first = data && data.success && Array.isArray(data.results) ? data.results[0] : null;
-        if (first) { if (map.current) map.current.flyTo({ center: [first.lng, first.lat], zoom: 13, speed: 1.5 }); } else { alert(`Nahi mila.`); }
+        if (first) { mapUserMovedRef.current = true; if (map.current) map.current.flyTo({ center: [first.lng, first.lat], zoom: 13, speed: 1.5 }); } else { alert(`Nahi mila.`); }
       } catch { /* search fail: user dobara try karega */ }
     }
   };
@@ -613,7 +632,8 @@ export default function MainApp() {
       const days = Number(postDays);
       if (!Number.isInteger(days) || days < 1 || days > 365) return alert('Service listing duration 1 se 365 din ke beech chunein.');
     }
-    if(!postLng || !postLat) return alert("Kripya map par location select karein! 'Map' button par click karein ya Live Location chunein.");
+    if(!postLng || !postLat || !postLocationConfirmed) return alert("Kripya 'Map' button se location pin karke 'Confirm Location' dabayein. Bina confirm kiye ad publish nahi hoga.");
+    if(postLandmark.trim().length < 2) return alert("Location/Landmark field khali hai — area, colony ya nearby landmark likhein.");
     const amount = getPayAmount();
     if (amount === '0' || amount === '') {
       // ✅ P0 fix: bina confirm ke publish nahi (free bhi)
@@ -622,11 +642,22 @@ export default function MainApp() {
     } else {
       // 🔁 P0 fix: same ad ka same code reuse — cancel ke baad naya code na bane (payment mismatch na ho)
       if (!payCode) setPayCode(makePayCode());
+      setPayRefError('');
       setShowPaymentWindow(true);
     }
   };
 
   const submitAd = async () => {
+    const amount = getPayAmount();
+    if (amount !== '0' && amount !== '') {
+      const ref = payRef.trim();
+      if (ref.length < 6) {
+        setPayRefError('Payment ke baad mila UPI Ref / UTR number daalna zaroori hai (min 6 characters).');
+        setShowPaymentWindow(true);
+        return;
+      }
+      setPayRefError('');
+    }
     if (submitLockRef.current) return; // 🚫 P0 fix: double-tap par 2 ads nahi
     submitLockRef.current = true;
     setIsSubmitting(true);
@@ -699,16 +730,16 @@ export default function MainApp() {
     const defaultCat = (sysSettings.categories && sysSettings.categories[0]) || 'PG';
     setPostCategory(defaultCat); setPostType(typesForCategory(defaultCat)[0]);
     setSelectedFacilities([]); setPoiSelected([]); pickSnapshotRef.current = null; pickCanceledRef.current = false;
-    setPostLng(null); setPostLat(null); setGpsAccuracy(null);
+    setPostLng(null); setPostLat(null); setPostLocationConfirmed(false); setGpsAccuracy(null);
     setAdType('regular'); setPromoPlan('7'); setWantBanner(false);
-    setPayRef(''); setPayCode('');
+    setPayRef(''); setPayRefError(''); setPayCode('');
     setPostCategory((sysSettings.categories && sysSettings.categories[0]) || 'PG');
     clearPostPhotos();
   };
 
   useEffect(() => {
     if (map.current || mapDead) return;
-    map.current = new maplibregl.Map({ container: mapContainer.current, style: MAP_STYLE, center: [74.3218, 29.5894], zoom: 13, maxZoom: 19, attributionControl: { compact: true } });
+    map.current = new maplibregl.Map({ container: mapContainer.current, style: MAP_STYLE, center: readSavedMapCenter(), zoom: 13, maxZoom: 19, attributionControl: { compact: true } });
     map.current.on('load', () => {
       setMapLoaded(true);
       // P2 #38: rooms map se pehle aa gaye the → pending fly ab
@@ -718,6 +749,10 @@ export default function MainApp() {
         try { map.current.flyTo({ center: [t.lng, t.lat], zoom: t.zoom || 16 }); } catch { /* map dead → ignore */ }
       }
     });
+    // Auto-location sirf tab lage jab user ne map khud move/click na kiya ho.
+    map.current.on('dragstart', () => { mapUserMovedRef.current = true; });
+    map.current.on('zoomstart', (e) => { if (e && e.originalEvent) mapUserMovedRef.current = true; });
+    map.current.on('click', () => { mapUserMovedRef.current = true; });
     // P2 #44: tile-load errors gino — 6 ke baad banner ("internet check / satellite try")
     map.current.on('error', (e) => {
       const isTileErr = !!(e && e.tile) || /tile|failed to fetch|network/i.test(String((e && e.error && e.error.message) || ''));
@@ -733,6 +768,40 @@ export default function MainApp() {
       setMapLoaded(false);
     };
   }, [mapDead]);
+
+  // 📍 First-open auto location: saved location turant center, phir GPS se fresh city/area.
+  // Shared room link par nahi — us ad par fly hona chahiye.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('room')) return;
+    if (!navigator.geolocation) return;
+    let cancelled = false;
+    const locate = async () => {
+      let permission = 'prompt';
+      try {
+        if (navigator.permissions?.query) permission = (await navigator.permissions.query({ name: 'geolocation' })).state;
+      } catch { /* Permissions API optional */ }
+      if (permission === 'denied') return;
+      if (permission === 'prompt') {
+        // Ek hi baar prompt — dismiss karne par har reload par pareshan na kare.
+        try {
+          if (sessionStorage.getItem('roomkhojo_geo_asked')) return;
+          sessionStorage.setItem('roomkhojo_geo_asked', '1');
+        } catch { /* storage blocked → prompt allowed */ }
+      }
+      if (cancelled) return;
+      navigator.geolocation.getCurrentPosition((pos) => {
+        if (cancelled) return;
+        const { latitude, longitude } = pos.coords;
+        try { localStorage.setItem('roomkhojo_last_location', JSON.stringify({ lat: latitude, lng: longitude })); } catch { /* storage optional */ }
+        setUserLoc({ lat: latitude, lng: longitude });
+        updateUserMarker(latitude, longitude);
+        if (!map.current || mapUserMovedRef.current) return;
+        try { map.current.flyTo({ center: [longitude, latitude], zoom: 13, duration: 900 }); } catch { /* map not ready */ }
+      }, () => { /* denied/unavailable — saved/default center */ }, { enableHighAccuracy: false, timeout: 7000, maximumAge: 60000 });
+    };
+    locate();
+    return () => { cancelled = true; };
+  }, [updateUserMarker]);
 
   // 🛑 P1 #27: geolocation watch unmount par band (battery + memory)
   useEffect(() => () => {
@@ -938,6 +1007,7 @@ export default function MainApp() {
     if (!b) return;
     openRoomPopup(b); // P2 #39: URL/history bhi sahi
     setView('map');
+    mapUserMovedRef.current = true;
     if (map.current) map.current.flyTo({ center: [b.lng, b.lat], zoom: 15.5 });
   };
 
@@ -1186,11 +1256,16 @@ export default function MainApp() {
 
   // 📞 P1: revealed number par call/whatsapp kholo
   const doContactNav = (mobile, room, type) => {
-    const clean = String(mobile || '').replace(/\D/g, '').slice(-10);
-    if (clean.length !== 10) return alert('Number available nahi hai.');
-    if (type === 'call') { window.location.href = `tel:${clean}`; return; }
-    const text = encodeURIComponent(`Namaste! Maine RoomKhojo par aapka room "${room.title}" dekha. Kya ye abhi available hai? \n\nRoom Link: ${window.location.href}`);
-    window.location.href = `https://wa.me/91${clean}?text=${text}`;
+    const clean = phoneDigits(mobile);
+    if (!clean) return alert('Number available nahi hai.');
+    if (type === 'call') {
+      const call = telUrl(clean);
+      if (call) window.location.href = call;
+      return;
+    }
+    const text = `Namaste! Maine RoomKhojo par aapka room "${room.title}" dekha. Kya ye abhi available hai? \n\nRoom Link: ${window.location.href}`;
+    const wa = whatsappUrl(clean, text);
+    if (wa) window.location.href = wa;
   };
 
   // 📞 P1: contact click — guest ko security popup, logged-in ko number reveal (daily limit se)
@@ -1222,7 +1297,7 @@ export default function MainApp() {
   };
 
   useEffect(() => {
-    if (!map.current) return;
+    if (!map.current || !mapLoaded) return;
     markersRef.current.forEach(m => m.remove()); markersRef.current = [];
     sortedRooms.forEach(room => {
       const isSelected = selectedRoom && selectedRoom._id === room._id;
@@ -1264,13 +1339,14 @@ export default function MainApp() {
         const now = Date.now();
         if (now - lastTapAt < 400) return;
         lastTapAt = now;
+        mapUserMovedRef.current = true;
         openRoomPopup(room);
         if (map.current) map.current.flyTo({ center: [room.lng, room.lat], zoom: 15.5 });
       };
       el.addEventListener('click', onClick); el.addEventListener('touchstart', onClick);
       const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([room.lng, room.lat]).addTo(map.current); markersRef.current.push(marker);
     });
-  }, [sortedRooms, selectedRoom]);
+  }, [sortedRooms, selectedRoom, mapLoaded]);
 
   const openPostAdForm = (kind = 'room') => {
     const nextKind = kind === 'service' ? 'service' : 'room';
@@ -1282,8 +1358,8 @@ export default function MainApp() {
       setPostTitle(''); setPostPrice(''); setPostDesc('');
       setPostLandmark(''); setPostMapUrl('');
       setSelectedFacilities([]); setPoiSelected([]);
-      setPostLng(null); setPostLat(null); setGpsAccuracy(null); setShowLocationWarning(false);
-      setPostDays('30'); setPayRef(''); setPayCode(''); setShowPaymentWindow(false);
+      setPostLng(null); setPostLat(null); setPostLocationConfirmed(false); setGpsAccuracy(null); setShowLocationWarning(false);
+      setPostDays('30'); setPayRef(''); setPayRefError(''); setPayCode(''); setShowPaymentWindow(false);
       if (nextKind === 'service') {
         setPostCategory(SERVICE_CATEGORIES[0]);
         setPostType('Service');
@@ -1299,19 +1375,9 @@ export default function MainApp() {
       const saved = savedUserPhone();
       if (saved) setPostMobile(saved);
     }
-    // Form TURANT kholo — location ka 5-sec wait khatam.
-    // Location background me best-effort (mil gayi toh pre-pin, nahi toh Map button hai).
+    // Form turant kholo. Location silently pre-pin NAHI karte —
+    // user Map/GPS se khud confirm karega, tabhi payment khulega.
     setIsPostAdOpen(true);
-    if (navigator.geolocation && postLng === null) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          if ((pos.coords.accuracy || 9999) <= 150) { setPostLng(pos.coords.longitude); setPostLat(pos.coords.latitude); }
-          else setShowLocationWarning(true);
-        },
-        () => { setShowLocationWarning(true); },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-      );
-    }
   };
 
   const handlePostAdClick = (kind = 'room') => {
@@ -1354,6 +1420,7 @@ export default function MainApp() {
     pickCanceledRef.current = false;
     setPostLng(center.lng);
     setPostLat(center.lat);
+    setPostLocationConfirmed(true);
     reverseGeocode(center.lat, center.lng);
     setIsPickingLocation(false);
     setGpsAccuracy(null);
@@ -1436,6 +1503,11 @@ export default function MainApp() {
             <p className="text-[11px] font-bold text-gray-400">Map load ho raha hai…</p>
           </div>
         )}
+        {view === 'map' && mapLoaded && roomsLoading && !mapDead && (
+          <div className="absolute left-1/2 top-3 z-30 -translate-x-1/2 pointer-events-none rounded-full bg-gray-900/85 px-3 py-1.5 text-[10px] font-black text-white shadow-lg flex items-center gap-1.5">
+            <Loader2 size={12} className="animate-spin" /> Listings load ho rahi hain…
+          </div>
+        )}
         {mapDead && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-gray-100 p-8 text-center">
             <p className="font-black text-gray-700">Map browser me blocked hai (WebGL off / Shields on).</p>
@@ -1494,7 +1566,7 @@ export default function MainApp() {
                   <div className="flex gap-2 mt-3 items-center">
                     {reportedIds.includes(room._id) ? (<span className="text-[10px] bg-gray-100 text-gray-400 px-2 py-1.5 rounded-lg font-bold border border-gray-200">Reported</span>) : (<button onClick={() => handleReportUnavailable(room._id)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1.5 rounded-lg font-bold border border-red-100 active:scale-95">Unavailable?</button>)}<button onClick={() => toggleFavorite(room._id)} className="text-[10px] bg-pink-50 text-pink-600 px-2 py-1.5 rounded-lg font-bold border border-pink-100 active:scale-95 inline-flex items-center gap-1">{savedIds.includes(room._id) ? (<><Heart size={12} fill="currentColor" /> Saved</>) : (<><Heart size={12} /> Save</>)}</button><button onClick={() => setShareRoom(room)} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1.5 rounded-lg font-bold border border-blue-100 active:scale-95 inline-flex items-center gap-1"><Share2 size={12} /> Share</button>
                   </div>
-                  <div className="flex gap-3 mt-3"><button onClick={() => openContact(room, 'call')} className="flex-1 bg-brand text-white py-2 rounded-xl font-black flex items-center justify-center gap-2 text-sm active:scale-95 transition-transform"><Phone size={16}/> Call</button><button onClick={() => openContact(room, 'whatsapp')} className="w-12 border-2 border-[#25D366] text-[#25D366] flex items-center justify-center rounded-xl active:scale-95 transition-transform"><MessageCircle size={18}/></button><a href={room.googleMapUrl || `https://www.google.com/maps/dir/?api=1&destination=${room.lat},${room.lng}`} target="_blank" rel="noreferrer" className="w-12 bg-blue-50 text-blue-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-blue-200"><Navigation size={18}/></a></div>
+                  <div className="flex gap-3 mt-3"><button onClick={() => openContact(room, 'call')} className="flex-1 bg-brand text-white py-2 rounded-xl font-black flex items-center justify-center gap-2 text-sm active:scale-95 transition-transform"><Phone size={16}/> Call</button><button onClick={() => openContact(room, 'whatsapp')} className="w-12 border-2 border-[#25D366] text-[#25D366] flex items-center justify-center rounded-xl active:scale-95 transition-transform"><MessageCircle size={18}/></button><a href={safeMapUrl(room.googleMapUrl, directionsUrl(room.lat, room.lng))} target="_blank" rel="noreferrer" className="w-12 bg-blue-50 text-blue-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-blue-200"><Navigation size={18}/></a></div>
                 </div>
               </div>
             )))}
@@ -1514,7 +1586,7 @@ export default function MainApp() {
             <div className="flex gap-2 items-center mb-3">
               {reportedIds.includes(selectedRoom._id) ? (<span className="text-[10px] bg-gray-100 text-gray-400 px-2 py-1 rounded border border-gray-200 font-bold shrink-0">Reported</span>) : (<button onClick={() => handleReportUnavailable(selectedRoom._id)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100 active:scale-95 font-bold shrink-0">Unavailable?</button>)}<button onClick={() => toggleFavorite(selectedRoom._id)} className="text-[10px] bg-pink-50 text-pink-600 px-2 py-1 rounded border border-pink-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1">{savedIds.includes(selectedRoom._id) ? (<><Heart size={12} fill="currentColor" /> Saved</>) : (<><Heart size={12} /> Save</>)}</button><button onClick={() => setShareRoom(selectedRoom)} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1"><Share2 size={12} /> Share</button>
             </div>
-            <div className="flex gap-2"><button onClick={() => openContact(selectedRoom, 'call')} className="flex-1 bg-brand text-white py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Phone size={14}/> Call</button><button onClick={() => openContact(selectedRoom, 'whatsapp')} className="flex-1 border-2 border-[#25D366] text-[#25D366] py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><MessageCircle size={14}/> WhatsApp</button><a href={selectedRoom.googleMapUrl || `https://www.google.com/maps/dir/?api=1&destination=${selectedRoom.lat},${selectedRoom.lng}`} target="_blank" rel="noreferrer" className="flex-1 bg-blue-50 text-blue-600 border border-blue-200 py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Navigation size={14}/> Navigate</a></div>
+            <div className="flex gap-2"><button onClick={() => openContact(selectedRoom, 'call')} className="flex-1 bg-brand text-white py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Phone size={14}/> Call</button><button onClick={() => openContact(selectedRoom, 'whatsapp')} className="flex-1 border-2 border-[#25D366] text-[#25D366] py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><MessageCircle size={14}/> WhatsApp</button><a href={safeMapUrl(selectedRoom.googleMapUrl, directionsUrl(selectedRoom.lat, selectedRoom.lng))} target="_blank" rel="noreferrer" className="flex-1 bg-blue-50 text-blue-600 border border-blue-200 py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95"><Navigation size={14}/> Navigate</a></div>
             {isLoggedIn && contactUsage && (<p className="text-[9px] font-bold text-gray-400 text-center mt-1.5">Aaj ke number reveals: {contactUsage.used}/{contactUsage.limit}{contactUsage.remaining > 0 ? ` — ${contactUsage.remaining} baaki` : ' — limit khatam'}{!revealedContacts[selectedRoom._id] && ' • Call/WhatsApp par number dikhega'}</p>)}
           </div>
         )}
@@ -1634,7 +1706,8 @@ export default function MainApp() {
               ) : (
                <div><p className="text-xs font-black text-gray-500 mb-2 uppercase">Select Facilities</p><div className="flex flex-wrap gap-2">{(sysSettings.facilities || []).map(fac => (<button type="button" key={fac} onClick={() => setSelectedFacilities(prev => prev.includes(fac) ? prev.filter(f => f !== fac) : [...prev, fac])} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${selectedFacilities.includes(fac) ? 'bg-brand text-white border-brand shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>{fac}</button>))}</div></div>
              )}
-              <div className="flex flex-wrap gap-2 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 min-w-[140px] p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button onClick={refreshGpsPin} disabled={isLocating} title="GPS se refresh" className="p-3 shrink-0 rounded-2xl font-black text-xs flex items-center justify-center border-2 bg-gray-50 text-gray-600 border-gray-200 active:scale-95 disabled:opacity-60">{isLocating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button><button onClick={startPickingLocation} className={`p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLng ? 'bg-green-50 text-green-600 border-green-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={16}/> {postLng ? (gpsAccuracy ? `Pinned! ±${gpsAccuracy}m` : 'Pinned!') : 'Map'}</button><button onClick={openPoiPicker} className="p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={16} /> Nearby</button></div>
+              <div className="flex flex-wrap gap-2 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 min-w-[140px] p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button onClick={refreshGpsPin} disabled={isLocating} title="GPS se refresh" className="p-3 shrink-0 rounded-2xl font-black text-xs flex items-center justify-center border-2 bg-gray-50 text-gray-600 border-gray-200 active:scale-95 disabled:opacity-60">{isLocating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button><button onClick={startPickingLocation} className={`p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLocationConfirmed ? 'bg-green-50 text-green-600 border-green-200' : postLng ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={16}/> {postLocationConfirmed ? (gpsAccuracy ? `Pinned! ±${gpsAccuracy}m` : 'Pinned!') : postLng ? 'Confirm' : 'Map'}</button><button onClick={openPoiPicker} className="p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={16} /> Nearby</button></div>
+              {(!postLocationConfirmed || postLandmark.trim().length < 2) && (<p className="mt-1.5 ml-1 text-[11px] font-bold text-amber-700">Payment/publish se pehle Map pin karke <span className="font-black">Confirm Location</span> karein aur landmark/location likhein.</p>)}
               <div>
                 <input type="url" value={postMapUrl} onChange={(e) => setPostMapUrl(e.target.value)} placeholder="Google Maps link (optional)" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm" />
                 <p className="text-[10px] font-bold text-gray-400 mt-1 ml-1">Google Maps par apni jagah kholo → Share link → yahan paste karo. Location isi link se set hogi (zyada accurate).</p>
@@ -1657,9 +1730,10 @@ export default function MainApp() {
             <div className="p-6 text-center">
               <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-2xl"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Your Secret Payment Code</p><h3 className="text-3xl font-black tracking-widest text-gray-800">{payCode}</h3></div>
               <div className="flex items-start gap-3 bg-blue-50 text-blue-800 p-4 rounded-2xl text-left text-xs font-bold mb-6"><AlertTriangle size={24} className="shrink-0 text-blue-600 mt-0.5" /><p>Niche 'Pay via UPI App' par click karein. Aapki UPI app open hogi. <strong>Payment karne ke baad wapas yahan aakar 'I have paid' par click karna na bhoolein.</strong></p></div>
-              <a href={`upi://pay?pa=${sysSettings.pricing.upiId || 'admin@ybl'}&pn=RoomKhojo&am=${getPayAmount()}&cu=INR&tn=Code: ${payCode}`} className="w-full bg-brand text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 mb-3 shadow-lg shadow-brand/30 active:scale-95 transition-transform">Pay via UPI App</a>
-              <input type="text" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="UPI Ref / UTR No. (payment ke baad milta hai)" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm mb-3 border" />
-              <button onClick={() => submitAd()} disabled={isSubmitting} className="w-full bg-green-50 text-green-700 py-4 rounded-2xl font-black flex items-center justify-center border border-green-200 active:scale-95 transition-transform">{isSubmitting ? (<><Loader2 size={18} className="animate-spin mr-2" /> Verifying… (max 60s)</>) : 'I have completed the payment'}</button>
+              <a href={upiUrl(sysSettings.pricing.upiId, getPayAmount(), `Code: ${payCode}`) || '#'} className="w-full bg-brand text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 mb-3 shadow-lg shadow-brand/30 active:scale-95 transition-transform">Pay via UPI App</a>
+              <input type="text" value={payRef} onChange={(e) => { setPayRef(e.target.value); setPayRefError(''); }} placeholder="UPI Ref / UTR No. (payment ke baad milta hai)" className={`w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm border ${payRefError ? 'border-red-300 bg-red-50' : 'border-gray-200'}`} />
+              <p className={`mt-1.5 mb-3 text-left text-[11px] font-bold ${payRefError ? 'text-red-600' : 'text-gray-500'}`}>{payRefError || 'UPI app se payment ke baad 12-digit UTR / Ref number yahan daalna zaroori hai.'}</p>
+              <button onClick={() => submitAd()} disabled={isSubmitting || payRef.trim().length < 6} className="w-full bg-green-50 text-green-700 py-4 rounded-2xl font-black flex items-center justify-center border border-green-200 active:scale-95 transition-transform disabled:opacity-50 disabled:cursor-not-allowed">{isSubmitting ? (<><Loader2 size={18} className="animate-spin mr-2" /> Verifying… (max 60s)</>) : payRef.trim().length < 6 ? 'Pehle UTR number dalein' : 'I have completed the payment'}</button>
               {isSubmitting && (<button onClick={cancelSubmit} className="mt-2 w-full bg-red-50 text-red-600 py-3 rounded-2xl font-black text-sm border border-red-200 active:scale-95 transition-transform">Submit Rok Do (Cancel)</button>)}
               <button onClick={() => setShowPaymentWindow(false)} className="mt-4 text-sm font-bold text-gray-400 underline">Cancel</button>
             </div>

@@ -6,7 +6,7 @@ import {
 import { apiFetch } from './apiFetch';
 import AuthField, { PasswordToggle } from './AuthField';
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-api.onrender.com').replace(/\/api\/?$/, '');
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-backend.vercel.app').replace(/\/api\/?$/, '');
 const STEPS = ['Email', 'Verify', 'Reset'];
 
 export default function ForgotPassword() {

@@ -21,7 +21,7 @@ const LegalPage = lazyRetry(() => import('./LegalPage'));
 const Support = lazyRetry(() => import('./Support'));
 const ForgotPassword = lazyRetry(() => import('./ForgotPassword'));
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-api.onrender.com').replace(/\/api\/?$/, ''); // P2 #58: sirf trailing /api strip (beech ka '/api' nahi)
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-backend.vercel.app').replace(/\/api\/?$/, ''); // P2 #58: sirf trailing /api strip (beech ka '/api' nahi)
 const DEFAULT_ADMIN_PATH = '/admin-secret-29';
 
 // Path normalize: / se shuru ho, aas-paas space na ho

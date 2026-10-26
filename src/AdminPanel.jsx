@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { User, Users, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft, Search, MoreVertical, Ban, Trash2, Phone, Calendar, RefreshCw, Briefcase } from 'lucide-react';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (admin token)
+import { safeImageUrl, whatsappUrl } from './safeUrl';
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-api.onrender.com'; // P2 #58: sirf trailing /api strip
+const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-backend.vercel.app'; // P2 #58: sirf trailing /api strip
 const API_URL = `${BASE_URL}/api/rooms`;
 const ADMIN_API = `${BASE_URL}/api/admin`;
 const SUPPORT_API = `${BASE_URL}/api/support`;
-const getImageUrl = (path) => !path ? 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=400&q=80' : path.startsWith('http') ? path : `${BASE_URL}${path}`;
+const getImageUrl = (path) => safeImageUrl(path);
 
 // Admin JWT (sessionStorage me) — hardcoded 'x-admin-secret' hata diya (C5 fix)
 const adminAuthHeaders = () => {
@@ -272,7 +273,10 @@ export default function AdminPanel() {
     try {
       const res = await apiFetch(`${ADMIN_API}/change-credentials`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() }, body: JSON.stringify({ oldPassword: oldPass, newUsername: newAdminUser, newPassword: newAdminPass }) });
       const data = await res.json(); alert(data.message);
-      if(data.success) { setOldPass(''); setNewAdminUser(''); setNewAdminPass(''); if(newAdminPass) { sessionStorage.removeItem('roomkhojo_admin_token'); setIsAuthenticated(false); } }
+      if (data.success) {
+        if (data.token) sessionStorage.setItem('roomkhojo_admin_token', data.token);
+        setOldPass(''); setNewAdminUser(''); setNewAdminPass('');
+      }
     } catch { alert("Error."); }
   };
 
@@ -545,7 +549,7 @@ export default function AdminPanel() {
                 <p className="text-[10px] font-bold text-gray-400 mt-2">Note: sirf un ads ka record jinka payment is fix ke baad approve hua.</p>
               </div>
             )}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mt-4"><div className="p-4 border-b bg-gray-50"><h3 className="font-black text-gray-800 flex items-center gap-2"><Clock size={18}/> Users & Ad Status Report</h3></div><div className="p-0 overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold border-b"><tr><th className="p-3">User/Owner</th><th className="p-3">Ad Title</th><th className="p-3 text-brand">Pay Code</th><th className="p-3">Plan</th><th className="p-3">Status</th><th className="p-3">Action</th></tr></thead><tbody className="divide-y divide-gray-100">{adminRooms.map(room => (<tr key={room._id} className="hover:bg-gray-50"><td className="p-3 font-bold text-gray-800"><div className="flex items-center gap-2"><div className="w-6 h-6 bg-brand/10 text-brand rounded-full flex justify-center items-center text-[10px] shrink-0"><User size={12}/></div>{room.ownerName || 'Owner'}</div></td><td className="p-3 text-gray-600 line-clamp-1 max-w-[150px]">{room.title}</td><td className="p-3 font-black text-brand bg-brand/5 border-x">{room.paymentCode || 'FREE'}</td><td className="p-3">{room.listingType === 'service' ? <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Briefcase size={11} /> Service {room.serviceDays || 0}D</span> : room.isPromoted ? <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoPlan}D</span> : <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">Regular</span>}</td><td className="p-3">{getPlanStatus(room)}</td><td className="p-3"><a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka Ad ("${room.title}") jald hi expire hone wala hai.`)}`} target="_blank" rel="noreferrer" className="bg-[#25D366]/10 text-[#25D366] px-3 py-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform w-fit"><MessageCircle size={14}/> Alert</a></td></tr>))}</tbody></table></div></div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mt-4"><div className="p-4 border-b bg-gray-50"><h3 className="font-black text-gray-800 flex items-center gap-2"><Clock size={18}/> Users & Ad Status Report</h3></div><div className="p-0 overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold border-b"><tr><th className="p-3">User/Owner</th><th className="p-3">Ad Title</th><th className="p-3 text-brand">Pay Code</th><th className="p-3">Plan</th><th className="p-3">Status</th><th className="p-3">Action</th></tr></thead><tbody className="divide-y divide-gray-100">{adminRooms.map(room => (<tr key={room._id} className="hover:bg-gray-50"><td className="p-3 font-bold text-gray-800"><div className="flex items-center gap-2"><div className="w-6 h-6 bg-brand/10 text-brand rounded-full flex justify-center items-center text-[10px] shrink-0"><User size={12}/></div>{room.ownerName || 'Owner'}</div></td><td className="p-3 text-gray-600 line-clamp-1 max-w-[150px]">{room.title}</td><td className="p-3 font-black text-brand bg-brand/5 border-x">{room.paymentCode || 'FREE'}</td><td className="p-3">{room.listingType === 'service' ? <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Briefcase size={11} /> Service {room.serviceDays || 0}D</span> : room.isPromoted ? <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoPlan}D</span> : <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">Regular</span>}</td><td className="p-3">{getPlanStatus(room)}</td><td className="p-3"><a href={whatsappUrl(room.mobile, `Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka Ad ("${room.title}") jald hi expire hone wala hai.`) || '#'} target="_blank" rel="noreferrer" className="bg-[#25D366]/10 text-[#25D366] px-3 py-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform w-fit"><MessageCircle size={14}/> Alert</a></td></tr>))}</tbody></table></div></div>
           </div>
         )}
 
@@ -571,7 +575,7 @@ export default function AdminPanel() {
               <div className="space-y-2.5">
                 {adminUsers.map(u => (
                   <div key={u.id} onClick={() => openUserProfile(u.id)} className="relative bg-white border border-gray-100 rounded-2xl p-3.5 flex items-center gap-3 cursor-pointer active:scale-[0.995] transition-transform">
-                    {u.pic ? <img src={u.pic} alt="" className="w-11 h-11 rounded-full object-cover shrink-0" /> : <div className="w-11 h-11 rounded-full bg-brand/10 text-brand flex items-center justify-center shrink-0 font-black text-sm">{(u.name || 'U').slice(0, 1).toUpperCase()}</div>}
+                    {u.pic ? <img src={safeImageUrl(u.pic)} alt="" className="w-11 h-11 rounded-full object-cover shrink-0" /> : <div className="w-11 h-11 rounded-full bg-brand/10 text-brand flex items-center justify-center shrink-0 font-black text-sm">{(u.name || 'U').slice(0, 1).toUpperCase()}</div>}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-black text-gray-800 text-sm truncate">{u.name || 'User'}</p>
@@ -706,7 +710,7 @@ export default function AdminPanel() {
                 {hasReports && (
                   <div className="bg-red-50 p-2.5 rounded-xl border border-red-100">
                     <p className="text-[10px] font-black text-red-600 mb-2 uppercase tracking-wider flex items-center gap-1"><AlertTriangle size={12}/> {room.unavailableReportCount} Users reported as unavailable!</p>
-                    <a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka room "${room.title}" kuch users ne "Unavailable" report kiya hai.\nKya aapka room rent par ja chuka hai? Kripya confirm karein taaki hum status update kar sakein.`)}`} target="_blank" rel="noreferrer" className="w-full bg-[#25D366]/10 text-[#25D366] py-2 rounded-lg text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95 transition-transform"><MessageCircle size={14}/> Ask Owner for Confirmation</a>
+                    <a href={whatsappUrl(room.mobile, `Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka room "${room.title}" kuch users ne "Unavailable" report kiya hai.\nKya aapka room rent par ja chuka hai? Kripya confirm karein taaki hum status update kar sakein.`) || '#'} target="_blank" rel="noreferrer" className="w-full bg-[#25D366]/10 text-[#25D366] py-2 rounded-lg text-[11px] font-black flex items-center justify-center gap-1.5 active:scale-95 transition-transform"><MessageCircle size={14}/> Ask Owner for Confirmation</a>
                   </div>
                 )}
                 {/* #53: banner controls ab Live ads me bhi (approve ke baad bhi manage ho sake) */}
@@ -740,8 +744,8 @@ export default function AdminPanel() {
           <header className="bg-white px-3 py-3 flex items-center gap-2 border-b shrink-0">
             <button onClick={() => setChatTicketId(null)} className="p-2 -ml-1 text-gray-600 active:scale-95"><ArrowLeft size={22} /></button>
             <div className="flex-1 min-w-0">
-              <p className="font-black text-gray-800 leading-tight truncate">{chatTicket.category}</p>
-              <p className="text-[11px] font-bold text-gray-400 truncate">{chatTicket.userName || chatTicket.userEmail || 'User'} • {chatTicket.status}</p>
+              <p className="font-black text-gray-800 leading-tight truncate">{chatTicket.category} {chatTicket.source === 'auth-help' && <span className="ml-1 rounded bg-purple-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-purple-700">Login Help</span>}</p>
+              <p className="text-[11px] font-bold text-gray-400 truncate">{chatTicket.userName || chatTicket.userEmail || 'User'} • {chatTicket.contactPhone || chatTicket.userEmail || 'No contact'} • {chatTicket.status}</p>
             </div>
             <button onClick={() => setRefreshKey(k => k + 1)} className="text-[11px] font-black bg-gray-100 text-gray-600 px-3 py-2 rounded-xl active:scale-95 shrink-0">Refresh</button>
             {chatTicket.status !== 'closed'
@@ -752,6 +756,11 @@ export default function AdminPanel() {
             <div className="bg-white p-3 rounded-2xl rounded-tl-md shadow-sm border border-gray-100 max-w-[92%]">
               <p className="text-[10px] font-black text-gray-400 uppercase mb-1">User complaint</p>
               <p className="text-sm font-bold text-gray-800">{chatTicket.message}</p>
+              {chatTicket.source === 'auth-help' && (
+                <div className="mt-2 rounded-xl border border-purple-200 bg-purple-50 p-2 text-[10px] font-bold leading-relaxed text-purple-800">
+                  Guest login/signup ticket — user abhi logged in nahi hai. Reply yahan save hoga; solution dene ke liye {[chatTicket.userEmail, chatTicket.contactPhone].filter(Boolean).join(' ya ') || 'user'} par contact karein.
+                </div>
+              )}
               {chatTicket.image && <img src={getImageUrl(chatTicket.image)} className="w-full max-h-56 rounded-xl object-cover border border-gray-200 mt-2" alt="Proof" />}
             </div>
             {(chatTicket.replies || []).map((r, i) => (
@@ -786,7 +795,9 @@ export default function AdminPanel() {
                 <div className="flex justify-between items-start gap-2 mb-2">
                   <div>
                     <span className={`text-[10px] font-black px-2 py-1 rounded-lg uppercase ${t.status === 'open' ? 'bg-orange-100 text-orange-700' : t.status === 'replied' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>{t.status}</span>
+                    {t.source === 'auth-help' && <span className="ml-1 rounded bg-purple-100 px-2 py-1 text-[9px] font-black uppercase text-purple-700">Login Help</span>}
                     <p className="text-xs font-black text-gray-700 mt-1">{t.category} • {t.userName || t.userEmail || 'User'}</p>
+                    {(t.userEmail || t.contactPhone) && <p className="mt-0.5 text-[10px] font-bold text-gray-400">{[t.userEmail, t.contactPhone].filter(Boolean).join(' • ')}</p>}
                   </div>
                   <button onClick={() => setChatTicketId(t._id)} className="text-xs font-black text-white bg-brand px-3 py-1.5 rounded-lg shrink-0 active:scale-95">Chat kholo</button>
                 </div>
@@ -977,7 +988,7 @@ export default function AdminPanel() {
             </div>
             <div className="p-4 overflow-y-auto space-y-4">
               <div className="flex items-center gap-3">
-                {userProfile.user.pic ? <img src={userProfile.user.pic} alt="" className="w-14 h-14 rounded-full object-cover" /> : <div className="w-14 h-14 rounded-full bg-brand/10 text-brand flex items-center justify-center font-black text-lg">{(userProfile.user.name || 'U').slice(0, 1).toUpperCase()}</div>}
+                {userProfile.user.pic ? <img src={safeImageUrl(userProfile.user.pic)} alt="" className="w-14 h-14 rounded-full object-cover" /> : <div className="w-14 h-14 rounded-full bg-brand/10 text-brand flex items-center justify-center font-black text-lg">{(userProfile.user.name || 'U').slice(0, 1).toUpperCase()}</div>}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap"><p className="font-black text-gray-800 truncate">{userProfile.user.name}</p><span className={`${userStatusPill(userProfile.user.status)} px-2 py-0.5 rounded text-[10px] font-black uppercase`}>{userProfile.user.status}</span></div>
                   <p className="text-xs font-bold text-gray-500 truncate">{userProfile.user.email}</p>

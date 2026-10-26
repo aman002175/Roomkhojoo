@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, Send } from 'lucide-react';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
+import { safeImageUrl } from './safeUrl';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-api.onrender.com').replace(/\/api\/?$/, ''); // P2 #58: sirf trailing /api strip
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-backend.vercel.app').replace(/\/api\/?$/, ''); // P2 #58: sirf trailing /api strip
 const CATEGORIES = ['Payment Issue', 'Ad Approval', 'Account & Login', 'Report Fake Ad', 'Other'];
 
 const authHeaders = () => {
@@ -195,7 +196,7 @@ export default function Support() {
             <div className="bg-white p-3 rounded-2xl rounded-tl-md shadow-sm border border-gray-100 max-w-[92%]">
               <p className="text-[10px] font-black text-gray-400 uppercase mb-1">Aapki complaint</p>
               <p className="text-sm font-bold text-gray-800">{chatTicket.message}</p>
-              {chatTicket.image && <img src={chatTicket.image} className="w-full max-h-56 rounded-xl object-cover border border-gray-200 mt-2" alt="Proof" />}
+              {chatTicket.image && <img src={safeImageUrl(chatTicket.image)} className="w-full max-h-56 rounded-xl object-cover border border-gray-200 mt-2" alt="Proof" />}
             </div>
             {(chatTicket.replies || []).map((r, i) => (
               <div key={i} className={`p-3 rounded-2xl text-sm font-bold max-w-[88%] shadow-sm ${r.by === 'admin' ? 'bg-white border border-blue-100 text-blue-900 rounded-tl-md' : 'bg-brand text-white rounded-tr-md ml-auto'}`}>
@@ -280,7 +281,7 @@ export default function Support() {
               </button>
             </div>
             <p className="text-sm font-bold text-gray-700">{t.message}</p>
-            {t.image && <img src={t.image} className="w-32 h-24 rounded-xl object-cover border border-gray-200 mt-2" alt="Proof" />}
+            {t.image && <img src={safeImageUrl(t.image)} className="w-32 h-24 rounded-xl object-cover border border-gray-200 mt-2" alt="Proof" />}
           </div>
         ))}
       </div>

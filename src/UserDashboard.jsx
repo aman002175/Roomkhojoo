@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, LogOut, Star, ArrowLeft, Settings, Bell, MapPin, Trash2, Edit3, X, Camera, ShieldAlert, Phone, Clock, Eye, Heart, RefreshCw, Link, AlertTriangle } from 'lucide-react';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
+import { safeImageUrl, telUrl, upiUrl } from './safeUrl';
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-api.onrender.com'; // P2 #58: sirf trailing /api strip
-const getImageUrl = (path) => !path ? 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=400&q=80' : path.startsWith('http') ? path : `${BASE_URL}${path}`;
+const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-backend.vercel.app'; // P2 #58: sirf trailing /api strip
+const getImageUrl = (path) => safeImageUrl(path);
 
 // Logged-in API calls ke liye Bearer header
 const authHeaders = () => {
@@ -420,7 +421,7 @@ export default function UserDashboard() {
         <button onClick={() => navigate('/')} className="absolute top-6 left-6 p-2 bg-white/20 rounded-full active:scale-95 transition-transform"><ArrowLeft size={20}/></button>
         <button onClick={() => { setEditName(currentUser?.name || ''); setEditPhone(currentUser?.phone || ''); setOldPw(''); setNewPw(''); setEmailStep('request'); setEmailOtp(''); setEmailInfo(''); setDelOtpSent(false); setDelOtp(''); setDelInfo(''); setSettingsOpen(true); }} className="absolute top-6 right-6 p-2 bg-white/20 rounded-full active:scale-95 transition-transform"><Settings size={20}/></button>
         <div className="flex flex-col items-center mt-6">
-          {currentUser?.pic ? ( <img src={currentUser.pic} alt="Profile" className="w-24 h-24 rounded-full border-4 border-white shadow-xl mb-4 object-cover" /> ) : ( <div className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center border-4 border-white shadow-xl mb-4"><User size={40}/></div> )}
+          {currentUser?.pic ? ( <img src={safeImageUrl(currentUser.pic)} alt="Profile" className="w-24 h-24 rounded-full border-4 border-white shadow-xl mb-4 object-cover" /> ) : ( <div className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center border-4 border-white shadow-xl mb-4"><User size={40}/></div> )}
           <h1 className="text-2xl font-black">Welcome, {currentUser?.name?.split(' ')[0] || 'User'}</h1>
           <p className="text-white/80 font-bold text-sm">{currentUser?.email || 'user@roomkhojo.com'}</p>
         </div>
@@ -561,7 +562,7 @@ export default function UserDashboard() {
                     <p className="text-[11px] font-bold text-gray-400 flex items-center gap-1"><MapPin size={12} className="shrink-0" /> {room.landmark || 'Hanumangarh'}</p>
                   </div>
                   <div className="flex flex-col gap-2 shrink-0">
-                    <a href={`tel:${room.mobile}`} className="bg-brand text-white p-2 rounded-xl flex items-center justify-center active:scale-95"><Phone size={16}/></a>
+                    <a href={telUrl(room.mobile)} className="bg-brand text-white p-2 rounded-xl flex items-center justify-center active:scale-95"><Phone size={16}/></a>
                     <button onClick={() => unsaveRoom(room._id)} className="bg-red-50 text-red-600 p-2 rounded-xl flex items-center justify-center active:scale-95"><Trash2 size={16}/></button>
                   </div>
                 </div>
@@ -615,7 +616,7 @@ export default function UserDashboard() {
                 <button key={d} onClick={() => setRenewPlan(d)} className={`flex-1 p-2 rounded-xl border text-xs font-bold transition-colors ${renewPlan === d ? 'bg-orange-50 border-orange-500 text-orange-600' : 'bg-gray-50 border-transparent text-gray-500'}`}>{d} Days<br /><span className="text-lg">₹{renewPrice(d)}</span></button>
               ))}
             </div>
-            <a href={`upi://pay?pa=${renewUpiId}&pn=RoomKhojo&am=${renewPrice(renewPlan)}&cu=INR&tn=Renew: ${renewCode}`} className="w-full bg-brand text-white py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 mb-3 shadow-lg active:scale-95">Pay ₹{renewPrice(renewPlan)} via UPI App</a>
+            <a href={upiUrl(renewUpiId, renewPrice(renewPlan), `Renew: ${renewCode}`) || '#'} className="w-full bg-brand text-white py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 mb-3 shadow-lg active:scale-95">Pay ₹{renewPrice(renewPlan)} via UPI App</a>
             <input type="text" value={renewRef} onChange={(e) => setRenewRef(e.target.value)} placeholder="UPI Ref / UTR No. (payment ke baad milta hai)" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border mb-3" />
             <button onClick={submitRenew} disabled={isSubmitting} className="w-full bg-green-600 text-white py-4 rounded-2xl font-black active:scale-95">{isSubmitting ? 'Bhej rahe hain...' : 'I have paid — Send for Verification'}</button>
           </div>
@@ -632,7 +633,7 @@ export default function UserDashboard() {
             </div>
             <div className="p-5 overflow-y-auto space-y-5 flex-1">
               <div className="flex items-center gap-3 bg-gray-50 p-4 rounded-2xl border">
-                {currentUser?.pic ? (<img src={currentUser.pic} alt="Profile" className="w-14 h-14 rounded-full object-cover border-2 border-white shadow shrink-0" />) : (<div className="w-14 h-14 bg-brand/10 rounded-full flex items-center justify-center text-brand shrink-0"><User size={28}/></div>)}
+                {currentUser?.pic ? (<img src={safeImageUrl(currentUser.pic)} alt="Profile" className="w-14 h-14 rounded-full object-cover border-2 border-white shadow shrink-0" />) : (<div className="w-14 h-14 bg-brand/10 rounded-full flex items-center justify-center text-brand shrink-0"><User size={28}/></div>)}
                 <div className="min-w-0"><p className="font-black text-gray-800 truncate">{currentUser?.name || 'User'}</p><p className="text-xs font-bold text-gray-500 truncate">{currentUser?.email || ''}</p>{currentUser?.phone && (<p className="text-xs font-bold text-gray-400">{currentUser.phone}</p>)}</div>
               </div>
               <div>

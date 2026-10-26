@@ -18,24 +18,5 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-    
-    <!-- 🚨 SERVICE WORKER REGISTER KARTA HAI YAHAN SE -->
-    <script>
-      if ('serviceWorker' in navigator) {
-        // Naya deploy aate hi ek hi baar auto-reload (purana bundle dikhna band)
-        const hadController = !!navigator.serviceWorker.controller;
-        let swRefreshing = false;
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (!hadController || swRefreshing) return;
-          swRefreshing = true;
-          window.location.reload();
-        });
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
-            .then(reg => console.log('PWA Service Worker Ready!', reg))
-            .catch(err => console.log('SW fail', err));
-        });
-      }
-    </script>
   </body>
 </html>
