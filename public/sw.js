@@ -20,7 +20,7 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   let url;
-  try { url = new URL(req.url); } catch (e) { return; }
+  try { url = new URL(req.url); } catch { return; }
   if (url.origin !== self.location.origin) return; // backend API (alag origin) — browser handle kare
   if (url.pathname.startsWith('/api/')) return;
 

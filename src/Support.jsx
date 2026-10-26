@@ -82,13 +82,11 @@ export default function Support() {
   };
 
   const openChat = (t) => { setChatId(t._id); markSeen(t); };
-
-  // Chat khula ho aur naya reply aaye (poll se) toh bhi seen mark karo
-  useEffect(() => {
-    if (!chatId) return;
+  const closeChat = () => {
     const t = tickets.find(x => x._id === chatId);
     if (t) markSeen(t);
-  }, [chatId, tickets]);
+    setChatId(null);
+  };
 
   const pickPhoto = (e) => {
     const f = (e.target.files || [])[0];
@@ -186,7 +184,7 @@ export default function Support() {
       {chatTicket && (
         <div className="fixed inset-0 z-[9999] bg-gray-50 flex flex-col font-sans">
           <header className="bg-white px-3 py-3 flex items-center gap-2 border-b shrink-0">
-            <button onClick={() => setChatId(null)} className="p-2 -ml-1 text-gray-600 active:scale-95"><ArrowLeft size={22} /></button>
+            <button onClick={closeChat} className="p-2 -ml-1 text-gray-600 active:scale-95" aria-label="Close chat"><ArrowLeft size={22} /></button>
             <div className="flex-1 min-w-0">
               <p className="font-black text-gray-800 leading-tight truncate">{chatTicket.category}</p>
               <p className="text-[11px] font-bold text-gray-400">{chatTicket.status === 'open' ? 'Khula hai' : chatTicket.status === 'replied' ? 'Jawab aaya' : 'Band'}</p>

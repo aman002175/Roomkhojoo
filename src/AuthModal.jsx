@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
-import { AlertCircle, CheckCircle2, Loader2, Lock, Mail, Phone, ShieldCheck, User, X } from 'lucide-react';
+import { AlertCircle, Loader2, Lock, Mail, Phone, ShieldCheck, User, X } from 'lucide-react';
 import { apiFetch } from './apiFetch';
 import AuthField, { PasswordToggle } from './AuthField';
 
@@ -13,7 +13,7 @@ const COPY = {
   signup: { title: 'Create account', subtitle: 'Free account banayein aur apna ad post karein.', cta: 'Create account' },
 };
 
-export default function AuthModal({ open, mode = 'login', onClose, onModeChange, onAuthed }) {
+export default function AuthModal({ mode = 'login', onClose, onModeChange, onAuthed }) {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -33,7 +33,10 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
   const dialogRef = useRef(null);
   const prevFocusRef = useRef(null);
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   const flashHint = () => {
     setHint(true);
@@ -45,33 +48,12 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
   useEffect(() => () => clearTimeout(hintTimer.current), []);
 
   useEffect(() => {
-    setError('');
-    setInfo('');
-    setBusy(null);
-    setSignupStep('form');
-    setOtp('');
-  }, [mode]);
-
-  useEffect(() => {
     if (cooldown <= 0) return undefined;
     const t = setInterval(() => setCooldown((c) => c - 1), 1000);
     return () => clearInterval(t);
   }, [cooldown]);
 
   useEffect(() => {
-    if (!open) {
-      setPass('');
-      setShowPass(false);
-      setBusy(null);
-      setError('');
-      setInfo('');
-      setOtp('');
-      setSignupStep('form');
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return undefined;
     prevFocusRef.current = document.activeElement;
     const t = setTimeout(() => {
       dialogRef.current?.querySelector('input[type="text"], input[type="email"]')?.focus();
@@ -99,9 +81,7 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
       const prev = prevFocusRef.current;
       if (prev && typeof prev.focus === 'function') setTimeout(() => prev.focus(), 0);
     };
-  }, [open]);
-
-  if (!open) return null;
+  }, []);
 
   const copy = COPY[mode] || COPY.login;
   const pwStrength = pass

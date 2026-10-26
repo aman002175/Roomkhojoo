@@ -130,7 +130,7 @@ const PoiIcon = ({ cat, size = 14, className = '' }) => {
 };
 
 // Category → professional icon (custom categories par Tag fallback)
-const CAT_ICONS = { all: Home, PG: Users, Flat: Building2, Room: Home, Hostel: Hotel, Library: BookOpen, Office: Briefcase, __services: Briefcase };
+const CAT_ICONS = { all: Home, PG: Users, Flat: Building2, Room: Home, Hostel: Hotel, Library: BookOpen, Office: Briefcase };
 const catIcon = (id) => CAT_ICONS[id] || Tag;
 
 // Overpass API (P2 #43: ab backend proxy se — cache + server-side timeout)
@@ -190,7 +190,10 @@ export default function MainApp() {
   const [selectedRoom, setSelectedRoom] = useState(null);
   // P2 #40: URL se filters restore (reload/share par reset nahi hote)
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
-  const [activeCategory, setActiveCategory] = useState(() => initialParams.get('cat') || 'all');
+  const [activeCategory, setActiveCategory] = useState(() => {
+    const cat = initialParams.get('cat');
+    return !cat || cat === '__services' ? 'all' : cat;
+  });
   const [activeAudience, setActiveAudience] = useState(() => initialParams.get('type') || 'all');
   // 🔍 Filters: price range + sort + radius
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -214,7 +217,13 @@ export default function MainApp() {
   const [searchQuery, setSearchQuery] = useState(() => initialParams.get('q') || ''); 
   
   const [isMenuOpen, setIsMenuOpen] = useState(false); 
-  const [authMode, setAuthMode] = useState(null);
+  const [authMode, setAuthMode] = useState(() => {
+    if (sessionStorage.getItem('roomkhojo_need_login')) {
+      sessionStorage.removeItem('roomkhojo_need_login');
+      return 'login';
+    }
+    return null;
+  });
   const [toast, setToast] = useState('');
   const toastTimer = useRef(null);
   const showToast = (msg) => {
@@ -306,9 +315,7 @@ export default function MainApp() {
   });
 
   // Hotfix: batch-9 refactor me ye definition galti se delete ho gayi thi — chips row "dynamicCategories is not defined" crash karta tha
-  const dynamicCategories = [{ id: 'all', name: 'All Rooms' }, ...(sysSettings.categories || []).map(cat => ({ id: cat, name: cat }))];
-  const isServiceView = activeCategory === '__services';
-  const serviceListingCount = rooms.filter(r => r.listingType === 'service').length;
+  const dynamicCategories = [{ id: 'all', name: 'All' }, ...(sysSettings.categories || []).map(cat => ({ id: cat, name: cat }))];
   const serviceDailyRate = Math.max(0, Math.floor(Number(sysSettings.pricing && sysSettings.pricing.serviceDailyRate) || 0));
   const serviceDaysNum = Math.max(0, Math.floor(Number(postDays) || 0));
   const serviceFee = serviceDailyRate * serviceDaysNum;
@@ -333,12 +340,28 @@ export default function MainApp() {
     window.location.reload();
   };
 
+  // 📍 P2 #38: map ready ho ya na ho — fly guaranteed (late map ke liye pending)
+  const flyWhenReady = (lng, lat, zoom = 16) => {
+    if (map.current) {
+      try { map.current.flyTo({ center: [lng, lat], zoom }); return; } catch { /* map dead → pending */ }
+    }
+    pendingFlyToRef.current = { lng, lat, zoom };
+  };
+
+  // P2 #40: sirf room param hatao — filters URL me bane rahein
+  const cleanRoomParam = () => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete('room');
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+  };
+
   useEffect(() => {
-    setRoomsError(false);
     apiFetch(`${API_URL}`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
+          setRoomsError(false);
           setRooms(data.rooms);
           // P1 #34: agle offline ke liye cache (1.5MB se bada ho toh skip)
           try { const json = JSON.stringify(data.rooms || []); if (json.length < 1500000) localStorage.setItem('roomkhojo_rooms_cache', json); } catch { /* cache optional */ }
@@ -362,7 +385,7 @@ export default function MainApp() {
         // P1 #33/#34: pehle cached list try karo (offline-friendly), warna error card
         try {
           const cached = JSON.parse(localStorage.getItem('roomkhojo_rooms_cache') || 'null');
-          if (Array.isArray(cached) && cached.length > 0) setRooms(cached);
+          if (Array.isArray(cached) && cached.length > 0) { setRooms(cached); setRoomsError(false); }
           else setRoomsError(true);
         } catch { setRoomsError(true); }
       });
@@ -379,7 +402,7 @@ export default function MainApp() {
 
   // 📞 P1: logged-in user ka number-reveal usage (login par + har list refresh par)
   useEffect(() => {
-    if (!isLoggedIn) { setContactUsage(null); setRevealedContacts({}); return; }
+    if (!isLoggedIn) return;
     apiFetch(`${API_URL}/contact-usage`, { headers: authHeaders() })
       .then(res => res.json())
       .then(data => { if (data.success) setContactUsage({ used: data.used, limit: data.limit, remaining: data.remaining }); })
@@ -416,10 +439,11 @@ export default function MainApp() {
     localStorage.setItem('roomkhojo_user', JSON.stringify(userData));
     setIsLoggedIn(true);
     setAuthMode(null);
-    // P2 #36: guest ne Post Ad tap kiya tha → login ke baad form khud khul jaye
+    // P2 #36: guest ne Post Ad / Post Advertisement tap kiya tha → login ke baad wahi form khule
     const pending = pendingActionRef.current;
     pendingActionRef.current = null;
-    if (pending === 'postAd') openPostAdForm();
+    if (pending === 'postAd') openPostAdForm('room');
+    else if (pending === 'postServiceAd') openPostAdForm('service');
   };
 
   // 🔐 P1 #32: kabhi bhi 401 (session expire) → auto logout + login screen
@@ -427,19 +451,13 @@ export default function MainApp() {
     const onExpired = (e) => {
       if (e.detail !== 'user') return;
       setIsLoggedIn(false);
+      setContactUsage(null);
+      setRevealedContacts({});
       setAuthMode('login');
       alert('Aapka session expire ho gaya. Dobara login karein.');
     };
     window.addEventListener('rk:auth-expired', onExpired);
     return () => window.removeEventListener('rk:auth-expired', onExpired);
-  }, []);
-
-  // 🔐 Dashboard se bounce hone par (token missing/expire) login modal khud khule — one-shot flag
-  useEffect(() => {
-    if (sessionStorage.getItem('roomkhojo_need_login')) {
-      sessionStorage.removeItem('roomkhojo_need_login');
-      setAuthMode('login');
-    }
   }, []);
 
   // 💰 Dual-range slider logic (0–20000, ends = no limit)
@@ -752,10 +770,9 @@ export default function MainApp() {
   // useMemo: har render par nayi array NA banao — warna markers bekaar me rebuild (flicker)
   const filteredRooms = useMemo(() => rooms.filter(r => {
     const isServiceRoom = r.listingType === 'service';
-    // Room tab me sirf rooms; Service tab me sirf service providers.
-    const matchesCategory = activeCategory === '__services'
-      ? isServiceRoom
-      : (activeCategory === 'all' ? !isServiceRoom : (!isServiceRoom && r.category === activeCategory));
+    // Rooms + advertisements ek saath map par. Room filters sirf rooms ko chunte hain;
+    // advertisement har category/audience view me visible rehta hai.
+    const matchesCategory = isServiceRoom || activeCategory === 'all' || r.category === activeCategory;
     const matchesAudience = isServiceRoom || activeAudience === 'all' || (r.type || '') === activeAudience;
     const price = priceNum(r.price);
     const okMin = minPrice === '' || price >= Number(minPrice);
@@ -902,14 +919,6 @@ export default function MainApp() {
       prev.forEach(p => { if (p.url) URL.revokeObjectURL(p.url); });
       return [];
     });
-  };
-
-  // 📍 P2 #38: map ready ho ya na ho — fly guaranteed (late map ke liye pending)
-  const flyWhenReady = (lng, lat, zoom = 16) => {
-    if (map.current) {
-      try { map.current.flyTo({ center: [lng, lat], zoom }); return; } catch { /* map dead → pending */ }
-    }
-    pendingFlyToRef.current = { lng, lat, zoom };
   };
 
   // Popup khulne par link me ?room=id lagao (share/copy ke liye) + back-button history entry (P2 #39)
@@ -1127,14 +1136,6 @@ export default function MainApp() {
     return () => window.removeEventListener('keydown', onKey);
   }, [shareRoom]);
 
-  // P2 #40: sirf room param hatao — filters URL me bane rahein
-  const cleanRoomParam = () => {
-    const params = new URLSearchParams(window.location.search);
-    params.delete('room');
-    const qs = params.toString();
-    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
-  };
-
   // Popup band karo + history/URL sahi karo (P2 #39)
   const closeRoomPopup = () => {
     setSelectedRoom(null);
@@ -1225,7 +1226,8 @@ export default function MainApp() {
     markersRef.current.forEach(m => m.remove()); markersRef.current = [];
     sortedRooms.forEach(room => {
       const isSelected = selectedRoom && selectedRoom._id === room._id;
-      const featured = isFeatured(room);
+      const isServiceAd = room.listingType === 'service';
+      const featured = !isServiceAd && isFeatured(room);
       const el = document.createElement('div');
       // Select hone par: ye POP-UP (upar+zoom), baaki FADE (halke)
       const popCls = !selectedRoom
@@ -1235,14 +1237,24 @@ export default function MainApp() {
           : 'opacity-40 saturate-50';
       el.className = `flex flex-col items-center cursor-pointer ${isSelected ? 'z-40' : featured ? 'z-20' : 'z-10'}`;
       const chip = document.createElement('div');
-      chip.className = `font-bold px-3 py-1.5 rounded-full shadow-lg border-2 border-white text-xs transition-all duration-300 flex items-center gap-1 ${featured ? 'bg-orange-500 text-white' : 'bg-green-600 text-white'} ${popCls}`;
-      // Static SVG icon (category/star) + textContent price (user-data kabhi innerHTML me nahi — XSS-safe)
-      chip.innerHTML = featured ? ICON_STAR : markerIcon(room.category);
-      const sp = document.createElement('span');
-      sp.textContent = room.price;
-      chip.appendChild(sp);
+      if (isServiceAd) {
+        // Advertisement = red capsule with business/service name (not a room pin).
+        chip.className = `max-w-[180px] font-black px-3 py-1.5 rounded-full shadow-lg border-2 border-white text-[11px] transition-all duration-300 flex items-center gap-1 bg-red-600 text-white ${popCls}`;
+        const label = document.createElement('span');
+        label.className = 'block min-w-0 truncate';
+        label.textContent = room.title || 'Advertisement';
+        chip.title = room.title || 'Advertisement';
+        chip.appendChild(label);
+      } else {
+        chip.className = `font-bold px-3 py-1.5 rounded-full shadow-lg border-2 border-white text-xs transition-all duration-300 flex items-center gap-1 ${featured ? 'bg-orange-500 text-white' : 'bg-green-600 text-white'} ${popCls}`;
+        // Static SVG icon (category/star) + textContent price (user-data kabhi innerHTML me nahi — XSS-safe)
+        chip.innerHTML = featured ? ICON_STAR : markerIcon(room.category);
+        const sp = document.createElement('span');
+        sp.textContent = room.price;
+        chip.appendChild(sp);
+      }
       const dot = document.createElement('div');
-      dot.className = `w-2 h-2 rounded-full border border-white shadow-md ${featured ? 'bg-orange-500' : 'bg-green-600'}`;
+      dot.className = `w-2 h-2 rounded-full border border-white shadow-md ${isServiceAd ? 'bg-red-600' : featured ? 'bg-orange-500' : 'bg-green-600'}`;
       dot.style.marginBottom = '-4px';
       el.appendChild(chip); el.appendChild(dot);
       // P2 #46: touchstart ke BAAD click bhi fire hota hai — dedupe (warna popup 2x khulta)
@@ -1260,7 +1272,28 @@ export default function MainApp() {
     });
   }, [sortedRooms, selectedRoom]);
 
-  const openPostAdForm = () => {
+  const openPostAdForm = (kind = 'room') => {
+    const nextKind = kind === 'service' ? 'service' : 'room';
+    // Do alag entry points: + sirf room, header ka red button sirf advertisement.
+    // Kind badalne par purana draft mix na ho.
+    if (postKind !== nextKind) {
+      setPostKind(nextKind);
+      setAdType('regular'); setPromoPlan('7'); setWantBanner(false);
+      setPostTitle(''); setPostPrice(''); setPostDesc('');
+      setPostLandmark(''); setPostMapUrl('');
+      setSelectedFacilities([]); setPoiSelected([]);
+      setPostLng(null); setPostLat(null); setGpsAccuracy(null); setShowLocationWarning(false);
+      setPostDays('30'); setPayRef(''); setPayCode(''); setShowPaymentWindow(false);
+      if (nextKind === 'service') {
+        setPostCategory(SERVICE_CATEGORIES[0]);
+        setPostType('Service');
+      } else {
+        const defaultCat = (sysSettings.categories && sysSettings.categories[0]) || 'PG';
+        setPostCategory(defaultCat);
+        setPostType(typesForCategory(defaultCat)[0]);
+      }
+      clearPostPhotos();
+    }
     // Signup/profile ka mobile listing form me prefill — user chaahe toh badal bhi sakta hai.
     if (!postMobile) {
       const saved = savedUserPhone();
@@ -1281,13 +1314,14 @@ export default function MainApp() {
     }
   };
 
-  const handlePostAdClick = () => {
+  const handlePostAdClick = (kind = 'room') => {
+    const nextKind = kind === 'service' ? 'service' : 'room';
     if (!isLoggedIn) {
-      pendingActionRef.current = 'postAd'; // P2 #36: login ke baad form khud khulega
+      pendingActionRef.current = nextKind === 'service' ? 'postServiceAd' : 'postAd';
       setAuthMode('login');
       return;
     }
-    openPostAdForm();
+    openPostAdForm(nextKind);
   };
 
   const startPickingLocation = () => {
@@ -1331,17 +1365,34 @@ export default function MainApp() {
     <div className="h-[100dvh] w-full bg-background flex flex-col overflow-hidden relative font-sans">
       {isOffline && (<div className="z-50 bg-amber-500 text-white text-center text-xs font-black py-1.5 px-3 shrink-0">Aap offline hain — internet check karein. Purane ads dikh rahe hain.</div>)}
       <div className="z-40 bg-white shadow-sm shrink-0">
-        <header className="px-3 py-1.5 flex justify-between items-center border-b border-gray-50"><div className="flex items-center gap-2"><button onClick={() => setIsMenuOpen(true)} className="p-1.5 -ml-1 text-gray-600 active:scale-95"><Menu size={24} /></button><div className="flex flex-col"><h1 className="text-xl font-black text-gray-800 tracking-tighter leading-tight">Room<span className="text-brand">Khojo</span></h1><a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="text-[10px] font-bold text-gray-500 hover:opacity-80 transition-opacity leading-none mt-0.5 tracking-tight">Built with <Heart size={10} fill="currentColor" className="inline text-brand" /> by <span className="text-brand">29 Dev's</span></a></div></div><button onClick={() => isLoggedIn ? navigate('/dashboard') : setAuthMode('login')} className={`w-9 h-9 border rounded-full flex items-center justify-center active:scale-95 transition-all ${isLoggedIn ? 'bg-brand text-white border-brand shadow-lg shadow-brand/30' : 'bg-gray-50 text-gray-600'}`}><User size={20} /></button></header>
-         <div className="px-3 pt-2"><div className="relative flex items-center"><Search className="absolute left-3 text-gray-400" size={18} /><input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={handleMapSearch} placeholder={isServiceView ? 'Service ya area search karein...' : 'Enter city (e.g. Ganganagar) & Search...'} className="w-full bg-gray-100 text-sm font-bold text-gray-700 rounded-2xl py-2 pl-10 pr-20 outline-none border border-transparent focus:border-brand/30 transition-colors"/><button onClick={handleMapSearch} className="absolute right-2 bg-brand text-white text-xs font-black px-3 py-1.5 rounded-xl active:scale-95 transition-transform shadow-md flex items-center gap-1">Go <Send size={13} /></button></div></div>
-         <div className="grid grid-cols-2 gap-1 mx-3 my-2 p-1 bg-gray-100 border rounded-2xl">
-           <button onClick={() => { setActiveCategory('all'); setActiveAudience('all'); }} className={`py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all ${!isServiceView ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-500'}`}><Home size={16} /> Rooms</button>
-           <button onClick={() => { setActiveCategory('__services'); setActiveAudience('all'); }} className={`py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all ${isServiceView ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-500'}`}><Briefcase size={16} /> Service Providers {serviceListingCount > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${isServiceView ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-500'}`}>{serviceListingCount}</span>}</button>
-         </div>
-         {!isServiceView && (<div className="flex overflow-x-auto no-scrollbar py-2 px-3 gap-2">{dynamicCategories.map((cat) => { const Icon = catIcon(cat.id); return (<button key={cat.id} onClick={() => { setActiveCategory(cat.id); setActiveAudience('all'); }} className={`flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-2xl text-[13px] font-bold whitespace-nowrap ${activeCategory === cat.id ? 'bg-brand text-white shadow-lg shadow-brand/30 scale-105' : 'bg-gray-100 text-gray-600'}`}><Icon size={16} /><span>{cat.name}</span></button>); })}</div>)}
-         {isServiceView && (<div className="px-3 pb-2 flex items-center justify-between"><p className="text-[11px] font-black text-gray-600 flex items-center gap-1"><Briefcase size={12} className="text-purple-600" /> Service Providers</p><span className="text-[10px] font-bold text-gray-400">{serviceListingCount} listed</span></div>)}
+        <header className="px-3 pt-1.5 pb-2 border-b border-gray-50">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setIsMenuOpen(true)} className="p-1.5 -ml-1 text-gray-600 active:scale-95" aria-label="Open menu"><Menu size={24} /></button>
+              <div className="flex flex-col">
+                <h1 className="text-xl font-black text-gray-800 tracking-tighter leading-tight">Room<span className="text-brand">Khojo</span></h1>
+                <a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="text-[10px] font-bold text-gray-500 hover:opacity-80 transition-opacity leading-none mt-0.5 tracking-tight">Built with <Heart size={10} fill="currentColor" className="inline text-brand" /> by <span className="text-brand">29 Dev's</span></a>
+              </div>
+            </div>
+            <button onClick={() => isLoggedIn ? navigate('/dashboard') : setAuthMode('login')} className={`w-9 h-9 border rounded-full flex items-center justify-center active:scale-95 transition-all ${isLoggedIn ? 'bg-brand text-white border-brand shadow-lg shadow-brand/30' : 'bg-gray-50 text-gray-600'}`} aria-label={isLoggedIn ? 'Open dashboard' : 'Login'}><User size={20} /></button>
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-[10px] font-bold text-gray-400">Tiffin, laundry ya tuition ad?</p>
+            <button type="button" onClick={() => handlePostAdClick('service')} className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-3 py-1.5 text-[11px] font-black text-white shadow-sm shadow-red-600/20 active:scale-95 transition-transform"><Megaphone size={13} /> Post Advertisement</button>
+          </div>
+        </header>
+        <div className="px-3 pt-2"><div className="relative flex items-center"><Search className="absolute left-3 text-gray-400" size={18} /><input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={handleMapSearch} placeholder="Area, room ya service search karein..." className="w-full bg-gray-100 text-sm font-bold text-gray-700 rounded-2xl py-2 pl-10 pr-20 outline-none border border-transparent focus:border-brand/30 transition-colors"/><button onClick={handleMapSearch} className="absolute right-2 bg-brand text-white text-xs font-black px-3 py-1.5 rounded-xl active:scale-95 transition-transform shadow-md flex items-center gap-1">Go <Send size={13} /></button></div></div>
+        <div className="flex overflow-x-auto no-scrollbar py-2 px-3 gap-2">{dynamicCategories.map((cat) => { const Icon = catIcon(cat.id); return (<button key={cat.id} onClick={() => { setActiveCategory(cat.id); setActiveAudience('all'); }} className={`flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-2xl text-[13px] font-bold whitespace-nowrap ${activeCategory === cat.id ? 'bg-brand text-white shadow-lg shadow-brand/30 scale-105' : 'bg-gray-100 text-gray-600'}`}><Icon size={16} /><span>{cat.name}</span></button>); })}</div>
         {/* 🔍 FILTERS (price + sort + radius) */}
         <div className="px-3 pb-2">
-          <button onClick={() => setFiltersOpen(!filtersOpen)} className="flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-2xl text-xs font-black text-gray-600 active:scale-95"><Search size={14} /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}<span>{filtersOpen ? '▲' : '▼'}</span></button>
+          <div className="flex items-center justify-between gap-2">
+            <button onClick={() => setFiltersOpen(!filtersOpen)} className="flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-2xl text-xs font-black text-gray-600 active:scale-95"><Search size={14} /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}<span>{filtersOpen ? '▲' : '▼'}</span></button>
+            <div className="flex items-center gap-2.5 text-[9px] font-bold text-gray-500" aria-label="Map marker legend">
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-green-600" /> Room</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-500" /> Promo</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-4 rounded-full bg-red-600" /> Ad</span>
+            </div>
+          </div>
           {filtersOpen && (
             <div className="mt-2 bg-gray-50 border border-gray-200 rounded-2xl p-3 space-y-2">
               <div className="px-1">
@@ -1362,7 +1413,7 @@ export default function MainApp() {
             </div>
           )}
         </div>
-        {activeCategory !== 'all' && activeCategory !== '__services' && (
+        {activeCategory !== 'all' && (
           <div className="flex overflow-x-auto no-scrollbar pb-2 px-3 gap-2">
             {['all', ...typesForCategory(activeCategory)].map(aud => (
               <button key={aud} onClick={() => setActiveAudience(aud)} className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-black whitespace-nowrap border ${activeAudience === aud ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-gray-500 border-gray-200'}`}>
@@ -1400,7 +1451,7 @@ export default function MainApp() {
               <div onClick={openBannerRoom} data-room-idx={bannerIndex % bannerRooms.length} className="bg-white/95 backdrop-blur rounded-xl shadow-lg border border-purple-200 px-2 py-1.5 flex items-center gap-2 active:scale-[0.98] transition-transform cursor-pointer">
                 <img src={getImageUrl(b.image)} className="w-11 h-11 rounded-lg object-cover bg-gray-200 shrink-0" alt="Sponsored" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[8px] font-black text-purple-600 uppercase tracking-wider flex items-center gap-1"><Star size={10} fill="currentColor" /> {b.listingType === 'service' ? 'Service Ad' : 'Sponsored'}</p>
+                  <p className={`text-[8px] font-black uppercase tracking-wider flex items-center gap-1 ${b.listingType === 'service' ? 'text-red-600' : 'text-purple-600'}`}>{b.listingType === 'service' ? <Megaphone size={10} /> : <Star size={10} fill="currentColor" />} {b.listingType === 'service' ? 'Advertisement' : 'Sponsored'}</p>
                   <p className="font-black text-gray-800 text-[13px] leading-tight truncate">{b.title}</p>
                   <p className="text-brand font-black text-[13px]">{b.price} <span className="text-[10px] text-gray-400 font-bold">• {b.category} • {b.type}</span></p>
                 </div>
@@ -1433,11 +1484,11 @@ export default function MainApp() {
         
         <div className={`absolute inset-0 z-20 bg-background overflow-y-auto p-4 transition-transform duration-500 ${view === 'list' ? 'translate-y-0' : 'translate-y-full'}`}>
           <div className="grid gap-5 pb-32">
-            {roomsError ? (<div className="text-center p-10"><AlertTriangle size={28} className="mx-auto text-amber-500 mb-2" /><p className="text-gray-600 font-bold text-sm mb-3">Ads load nahi ho paye. Internet check karein.</p><button onClick={() => setRoomsReloadKey(k => k + 1)} className="bg-brand text-white px-5 py-2.5 rounded-xl font-black text-sm active:scale-95">Retry</button></div>) : sortedRooms.length === 0 ? (<div className="text-center p-10 text-gray-500 font-bold">{isServiceView ? 'Koi service provider nahi mila.' : 'Koi result nahi mila.'}</div>) : (sortedRooms.map(room => (
+            {roomsError ? (<div className="text-center p-10"><AlertTriangle size={28} className="mx-auto text-amber-500 mb-2" /><p className="text-gray-600 font-bold text-sm mb-3">Ads load nahi ho paye. Internet check karein.</p><button onClick={() => setRoomsReloadKey(k => k + 1)} className="bg-brand text-white px-5 py-2.5 rounded-xl font-black text-sm active:scale-95">Retry</button></div>) : sortedRooms.length === 0 ? (<div className="text-center p-10 text-gray-500 font-bold">Koi listing nahi mili.</div>) : (sortedRooms.map(room => (
               <div key={room._id} className={`bg-white rounded-3xl overflow-hidden shadow-md border ${room.isPromoted ? 'border-orange-200' : 'border-gray-50'}`}>
                 <div className="relative"><img src={getImageUrl(room.image)} className="w-full h-48 object-cover bg-gray-200" alt="Room" />{isFeatured(room) && <div className="absolute top-3 left-3 bg-orange-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1"><Star size={10} fill="currentColor" /> Featured</div>}<div className="absolute top-3 right-3 bg-white/90 px-3 py-1 rounded-full text-brand font-black">{room.price}</div></div>
                 <div className="p-4">
-                  <div className="flex justify-between items-start mb-1"><h3 className="font-bold text-gray-900 text-lg leading-tight">{room.title}</h3><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-2">{room.listingType === 'service' ? 'Service' : room.type} • {room.category}</span></div>
+                  <div className="flex justify-between items-start mb-1"><h3 className="font-bold text-gray-900 text-lg leading-tight">{room.title}</h3><span className={`px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-2 ${room.listingType === 'service' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-gray-100 text-gray-600'}`}>{room.listingType === 'service' ? 'Advertisement' : `${room.type} • ${room.category}`}</span></div>
                   <p className="text-sm font-bold text-gray-500 flex items-center gap-1"><MapPin size={14} className="shrink-0" /> {room.landmark || 'Hanumangarh'}</p>
                   {Array.isArray(room.landmarks) && room.landmarks.length > 0 && (<div className="mt-1 space-y-0.5">{room.landmarks.slice(0, 3).map((l, i) => (<p key={i} className="text-[11px] font-bold text-purple-700 flex items-center gap-1"><PoiIcon cat={l.cat} size={12} /><span className="truncate">{l.name} ({fmtDist(l.distM)})</span></p>))}{room.landmarks.length > 3 && (<p className="text-[10px] font-bold text-purple-500">+{room.landmarks.length - 3} aur</p>)}</div>)}
                   <div className="flex gap-2 mt-3 items-center">
@@ -1453,7 +1504,7 @@ export default function MainApp() {
         {selectedRoom && view === 'map' && !isPickingLocation && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-h-[42dvh] overflow-y-auto bg-white rounded-2xl shadow-2xl z-[100] p-3 border border-gray-100">
               <button onClick={closeRoomPopup} className="absolute top-2 right-2 w-8 h-8 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-600 z-10"><X size={18}/></button>
-            <div className="flex gap-3 mb-2"><div className="flex gap-2 overflow-x-auto shrink-0 max-w-[45%] no-scrollbar">{roomGallery(selectedRoom).map((u, i) => (<img key={i} src={getImageUrl(u)} className="w-16 h-16 object-cover rounded-xl bg-gray-200 shrink-0 border border-gray-100" alt={`Room ${i + 1}`} />))}</div><div className="flex-1"><div className="flex justify-between items-start pr-10"><h3 className="font-black text-gray-800 line-clamp-1">{selectedRoom.title}</h3><span className="bg-brand/10 text-brand px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-1">{selectedRoom.listingType === 'service' ? 'Service' : selectedRoom.category}</span></div><p className="text-brand font-black text-xl leading-none mt-1">{selectedRoom.price}</p><p className="text-[11px] font-bold text-gray-500 mt-1.5 flex items-center gap-1"><User size={12}/> {selectedRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {revealedContacts[selectedRoom._id] ? `+91 ${revealedContacts[selectedRoom._id]}` : '••••• •••••'}</p></div></div>
+            <div className="flex gap-3 mb-2"><div className="flex gap-2 overflow-x-auto shrink-0 max-w-[45%] no-scrollbar">{roomGallery(selectedRoom).map((u, i) => (<img key={i} src={getImageUrl(u)} className="w-16 h-16 object-cover rounded-xl bg-gray-200 shrink-0 border border-gray-100" alt={`Room ${i + 1}`} />))}</div><div className="flex-1"><div className="flex justify-between items-start pr-10"><h3 className="font-black text-gray-800 line-clamp-1">{selectedRoom.title}</h3><span className={`px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-1 ${selectedRoom.listingType === 'service' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-brand/10 text-brand'}`}>{selectedRoom.listingType === 'service' ? 'Advertisement' : selectedRoom.category}</span></div><p className="text-brand font-black text-xl leading-none mt-1">{selectedRoom.price}</p><p className="text-[11px] font-bold text-gray-500 mt-1.5 flex items-center gap-1"><User size={12}/> {selectedRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {revealedContacts[selectedRoom._id] ? `+91 ${revealedContacts[selectedRoom._id]}` : '••••• •••••'}</p></div></div>
             {selectedRoom.description && (selectedRoom.listingType === 'service' ? (
               <p className="mb-2 border-t border-gray-50 pt-2 text-[11px] font-semibold leading-relaxed text-gray-600">{selectedRoom.description}</p>
             ) : (
@@ -1475,20 +1526,22 @@ export default function MainApp() {
           <button onClick={confirmPickingLocation} className="flex-1 bg-brand text-white py-2.5 rounded-2xl font-black shadow-lg flex justify-center items-center gap-2 active:scale-95 transition-transform"><MapPin size={20}/> Confirm Location</button>
         </div>
       ) : (
-<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={handlePostAdClick} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/privacy')} className="hover:text-brand transition-colors">Privacy</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by 29 Dev's</a></div></div>
+<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={() => handlePostAdClick('room')} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200" aria-label="Post room ad" title="Post room ad"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/privacy')} className="hover:text-brand transition-colors">Privacy</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by 29 Dev's</a></div></div>
       )}
       <div className={`fixed inset-0 z-[8000] transition-opacity duration-300 ${isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}><div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setIsMenuOpen(false)}></div><div className={`absolute top-0 left-0 bottom-0 w-[80%] max-w-sm bg-white flex flex-col transition-transform duration-300 ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}><div className="p-6 bg-brand/5 border-b"><h2 className="text-3xl font-black text-gray-800">Room<span className="text-brand">Khojo</span></h2></div><div className="p-4 space-y-2 flex-1 overflow-y-auto mt-4">{isLoggedIn && (<button onClick={() => { navigate('/dashboard'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><User size={20} className="text-brand"/> My Ads / Dashboard</div> <ChevronRight size={18} className="text-gray-400"/></button>)}{isLoggedIn && (<button onClick={handleLogout} className="w-full flex items-center justify-between p-4 rounded-2xl bg-red-50 hover:bg-red-100 font-bold text-red-600"><div className="flex items-center gap-3"><LogOut size={20}/> Logout</div> <ChevronRight size={18} className="text-red-300"/></button>)}{/* P2 #59: logout ab menu me bhi (dashboard settings ke saath) */}<button onClick={() => { navigate('/about'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Info size={20} className="text-brand"/> About Us</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/terms'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><FileText size={20} className="text-brand"/> Terms</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/privacy'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Lock size={20} className="text-brand"/> Privacy Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/refund'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Shield size={20} className="text-brand"/> Refund Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { if (!isLoggedIn) { setIsMenuOpen(false); setAuthMode('login'); } else { navigate('/support'); setIsMenuOpen(false); } }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-brand/5 hover:bg-brand/10 font-bold text-gray-700 border border-brand/20"><div className="flex items-center gap-3"><LifeBuoy size={20} className="text-brand"/> Support</div> <ChevronRight size={18} className="text-gray-400"/></button></div></div></div>
-      <AuthModal
-        open={Boolean(authMode)}
-        mode={authMode || 'login'}
-        onClose={() => setAuthMode(null)}
-        onModeChange={setAuthMode}
-        onAuthed={(token, user, kind) => {
-          saveSession(token, user);
-          const first = String((user && user.name) || '').trim().split(' ')[0];
-          showToast(kind === 'signup' ? `Account ban gaya${first ? `, ${first}` : ''}!` : `Welcome back${first ? `, ${first}` : ''}!`);
-        }}
-      />
+      {authMode && (
+        <AuthModal
+          key={authMode}
+          mode={authMode}
+          onClose={() => setAuthMode(null)}
+          onModeChange={setAuthMode}
+          onAuthed={(token, user, kind) => {
+            saveSession(token, user);
+            const first = String((user && user.name) || '').trim().split(' ')[0];
+            showToast(kind === 'signup' ? `Account ban gaya${first ? `, ${first}` : ''}!` : `Welcome back${first ? `, ${first}` : ''}!`);
+          }}
+        />
+      )}
       {toast && (
         <div className="fixed bottom-24 left-1/2 z-[9000] flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-bold text-white shadow-xl rk-fade-in">
           <Check size={16} className="text-emerald-400" />
@@ -1510,12 +1563,14 @@ export default function MainApp() {
 
       <div className={`fixed inset-0 z-[7000] bg-black/60 overflow-hidden transition-opacity ${isPostAdOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
         <div className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-[30px] flex flex-col transition-transform duration-500 ${isPostAdOpen ? 'translate-y-0' : 'translate-y-full'}`} style={{ maxHeight: '92dvh' }}>
-          <div className="p-5 border-b shrink-0 flex justify-between items-center sticky top-0 bg-white rounded-t-[30px] z-10"><h2 className="text-xl font-black">Post Ad</h2><button onClick={() => setIsPostAdOpen(false)} className="bg-gray-100 p-2 rounded-full"><X size={20}/></button></div>
+          <div className="p-5 border-b shrink-0 flex justify-between items-start gap-3 sticky top-0 bg-white rounded-t-[30px] z-10">
+            <div>
+              <h2 className="text-xl font-black">{postKind === 'service' ? 'Post Advertisement' : 'Post Room Ad'}</h2>
+              <p className="mt-0.5 text-[11px] font-bold text-gray-400">{postKind === 'service' ? 'Tiffin, laundry, tuition — service / business listing' : 'Room, PG, flat — property listing'}</p>
+            </div>
+            <button onClick={() => setIsPostAdOpen(false)} className="bg-gray-100 p-2 rounded-full shrink-0" aria-label="Close post form"><X size={20}/></button>
+          </div>
           <div className="p-5 overflow-y-auto overflow-x-hidden space-y-5 flex-1">
-             <div className="grid grid-cols-2 gap-1 rounded-2xl bg-gray-100 p-1 border">
-               <button type="button" onClick={() => { setPostKind('room'); setAdType('regular'); setWantBanner(false); setPostCategory((sysSettings.categories && sysSettings.categories[0]) || 'PG'); setPostType(typesForCategory((sysSettings.categories && sysSettings.categories[0]) || 'PG')[0]); }} className={`py-3 rounded-xl font-black text-sm transition-all ${postKind === 'room' ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-400'}`}>Room / Property</button>
-                <button type="button" onClick={() => { setPostKind('service'); setAdType('regular'); setWantBanner(false); setPostCategory(SERVICE_CATEGORIES[0]); setPostType('Service'); if (!postDays) setPostDays('30'); }} className={`py-3 rounded-xl font-black text-sm transition-all ${postKind === 'service' ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-400'}`}>Service Provider</button>
-             </div>
              {postKind === 'room' && (
                <>
                  <div className="flex bg-gray-100 p-1 rounded-2xl border"><button type="button" onClick={() => setAdType('regular')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all shadow-sm ${adType === 'regular' ? 'bg-white text-gray-900 border' : 'text-gray-400'}`}>Standard Ad</button><button type="button" onClick={() => setAdType('promo')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all shadow-md flex items-center justify-center gap-1.5 ${adType === 'promo' ? 'bg-orange-500 text-white' : 'text-gray-400'}`}><Star size={14} fill="currentColor" /> Promoted Ad</button></div>
@@ -1531,7 +1586,7 @@ export default function MainApp() {
               ) : (
                 <div className="flex items-start gap-2.5 rounded-2xl border border-purple-200 bg-purple-50 p-3">
                   <Megaphone size={18} className="mt-0.5 shrink-0 text-purple-600" />
-                  <p className="text-[11px] font-bold leading-relaxed text-purple-800">Service provider ads admin approval ke baad {serviceDaysNum || 0} din tak map ke upar banner strip me automatically dikhte hain — alag banner payment ki zaroorat nahi.</p>
+                  <p className="text-[11px] font-bold leading-relaxed text-purple-800">Advertisements admin approval ke baad {serviceDaysNum || 0} din tak map ke upar banner strip me automatically dikhte hain — alag banner payment ki zaroorat nahi.</p>
                 </div>
               )}
              <div className="space-y-3">
@@ -1588,7 +1643,7 @@ export default function MainApp() {
           </div>
           <div className="p-4 border-t bg-white sticky bottom-0 z-10">
              <button onClick={initiatePayment} disabled={isSubmitting} className={`w-full py-4 rounded-2xl font-black text-lg shadow-lg flex items-center justify-center gap-2 ${adType === 'promo' ? 'bg-orange-500 text-white' : 'bg-brand text-white'}`}>
-                {isSubmitting ? (<><Loader2 size={20} className="animate-spin" /> Publishing…</>) : (getPayAmount() === '0' || getPayAmount() === '' ? (postKind === 'service' ? 'Publish Service Ad (Free)' : 'Publish Ad (Free)') : `Pay ₹${getPayAmount()} & Publish`)}
+                {isSubmitting ? (<><Loader2 size={20} className="animate-spin" /> Publishing…</>) : (getPayAmount() === '0' || getPayAmount() === '' ? (postKind === 'service' ? 'Publish Advertisement (Free)' : 'Publish Room Ad (Free)') : `Pay ₹${getPayAmount()} & Publish`)}
              </button>
              {isSubmitting && !showPaymentWindow && (<button onClick={cancelSubmit} className="w-full mt-2 text-red-600 font-black text-sm underline">Submit cancel karein</button>)}
           </div>
@@ -1598,7 +1653,7 @@ export default function MainApp() {
       {showPaymentWindow && (
         <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative">
-            <div className="bg-orange-500 text-white p-6 text-center"><p className="font-bold text-orange-100 text-sm mb-1 uppercase tracking-wider">Payment Required</p><h2 className="text-4xl font-black">₹{getPayAmount()}</h2>{postKind === 'service' && (<p className="text-[11px] font-bold text-orange-100 mt-1">Service listing • {serviceDaysNum} din • approval ke baad duration start</p>)}</div>
+            <div className="bg-orange-500 text-white p-6 text-center"><p className="font-bold text-orange-100 text-sm mb-1 uppercase tracking-wider">Payment Required</p><h2 className="text-4xl font-black">₹{getPayAmount()}</h2>{postKind === 'service' && (<p className="text-[11px] font-bold text-orange-100 mt-1">Advertisement • {serviceDaysNum} din • approval ke baad duration start</p>)}</div>
             <div className="p-6 text-center">
               <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-2xl"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Your Secret Payment Code</p><h3 className="text-3xl font-black tracking-widest text-gray-800">{payCode}</h3></div>
               <div className="flex items-start gap-3 bg-blue-50 text-blue-800 p-4 rounded-2xl text-left text-xs font-bold mb-6"><AlertTriangle size={24} className="shrink-0 text-blue-600 mt-0.5" /><p>Niche 'Pay via UPI App' par click karein. Aapki UPI app open hogi. <strong>Payment karne ke baad wapas yahan aakar 'I have paid' par click karna na bhoolein.</strong></p></div>
