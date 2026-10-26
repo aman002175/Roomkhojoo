@@ -61,7 +61,7 @@ export default function UserDashboard() {
   // 🚨 EDIT STATES
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRoomId, setEditingRoomId] = useState(null);
-  const [editForm, setEditForm] = useState({ title: '', price: '', type: 'Boys', category: 'PG', landmark: '', mobile: '', description: [], googleMapUrl: '' });
+  const [editForm, setEditForm] = useState({ title: '', price: '', type: 'Boys', category: 'PG', landmark: '', mobile: '', description: [], googleMapUrl: '', listingType: 'room' });
   const [editKeep, setEditKeep] = useState([]); // mevcut URLs (✕ se hatao)
   const [editNew, setEditNew] = useState([]); // nayi files [{file, url}]
   // 🔄 Renew states
@@ -188,13 +188,16 @@ export default function UserDashboard() {
 
   // 🚨 OPEN EDIT MODAL
   const openEditModal = (room) => {
-    let facilities = [];
-    if(room.description) facilities = room.description.split(', ');
+    const isService = room.listingType === 'service';
+    // Service description free-text hai — comma split sirf room facilities ke liye.
+    const details = isService
+      ? [room.description || '']
+      : (room.description ? room.description.split(', ') : []);
     
     setEditForm({
       title: room.title, price: String(room.price || '').replace('₹', ''), type: room.type, // P2 #47: number/missing price par crash nahi
-      category: room.category, landmark: room.landmark, mobile: room.mobile, description: facilities,
-      googleMapUrl: room.googleMapUrl || ''
+      category: room.category, landmark: room.landmark, mobile: room.mobile, description: details,
+      googleMapUrl: room.googleMapUrl || '', listingType: isService ? 'service' : 'room'
     });
     setEditingRoomId(room._id);
     setEditKeep(room.images && room.images.length > 0 ? [...room.images] : (room.image ? [room.image] : []));
@@ -208,7 +211,7 @@ export default function UserDashboard() {
     setIsSubmitting(true);
     try {
       const fd = new FormData();
-      fd.append('title', editForm.title); fd.append('price', `₹${editForm.price}`); fd.append('type', editForm.type);
+      fd.append('title', editForm.title); fd.append('price', `₹${editForm.price}`); fd.append('type', editForm.listingType === 'service' ? 'Service' : editForm.type);
       fd.append('category', editForm.category); fd.append('landmark', editForm.landmark); fd.append('mobile', editForm.mobile);
       fd.append('description', editForm.description.join(', '));
       fd.append('googleMapUrl', (editForm.googleMapUrl || '').trim()); // 🗺️ optional
@@ -496,6 +499,9 @@ export default function UserDashboard() {
                                 <span className="text-[10px] font-black px-2 py-1 rounded-lg bg-blue-50 text-blue-700 inline-flex items-center gap-1">
                                   <Eye size={12} /> {room.views || 0}
                                 </span>
+                                {room.listingType === 'service' && (
+                                  <span className="text-[10px] font-black px-2 py-1 rounded-lg bg-purple-50 text-purple-700">Service</span>
+                                )}
                                 {daysLeft !== null && daysLeft > 3 && (
                                   <span className="text-[10px] font-bold text-gray-500">{daysLeft} Days Left</span>
                                 )}
@@ -507,8 +513,8 @@ export default function UserDashboard() {
                           <button onClick={() => toggleRoomStatus(room._id)} className="text-[10px] font-bold text-gray-500 border border-gray-200 bg-gray-50 px-3 py-1.5 rounded-lg active:scale-95 transition-colors hover:bg-gray-100">Hide/Show</button>
                           <div className="flex gap-2">
                             {/* 🔄 RENEW BUTTON (expired promo par) */}
-                            {isExpired && (<button onClick={() => openRenewModal(room, room.promoPlan && room.promoPlan !== 'regular' ? room.promoPlan : '7')} className="text-[11px] font-black text-white bg-orange-500 px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1"><RefreshCw size={12} /> Renew</button>)}
-                            {!room.isPromoted && !isExpired && (<button onClick={() => openRenewModal(room, '7')} className="text-[11px] font-black text-white bg-brand px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1"><Star size={12} fill="currentColor" /> Promote</button>)}
+                            {room.listingType !== 'service' && isExpired && (<button onClick={() => openRenewModal(room, room.promoPlan && room.promoPlan !== 'regular' ? room.promoPlan : '7')} className="text-[11px] font-black text-white bg-orange-500 px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1"><RefreshCw size={12} /> Renew</button>)}
+                            {room.listingType !== 'service' && !room.isPromoted && !isExpired && (<button onClick={() => openRenewModal(room, '7')} className="text-[11px] font-black text-white bg-brand px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1"><Star size={12} fill="currentColor" /> Promote</button>)}
                             {/* 🚨 EDIT BUTTON */}
                             <button onClick={() => openEditModal(room)} className="text-[11px] font-black text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg active:scale-95 flex items-center gap-1 transition-colors hover:bg-blue-100"><Edit3 size={14}/> Edit</button>
                             <button onClick={() => deleteRoom(room._id)} className="text-[11px] font-black text-red-600 bg-red-50 p-1.5 px-3 rounded-lg active:scale-95 flex items-center gap-1 transition-colors hover:bg-red-100"><Trash2 size={14}/> Delete</button>
@@ -615,7 +621,7 @@ export default function UserDashboard() {
                 <p className="text-xs font-black text-gray-500 mb-2 uppercase">Profile</p>
                 <div className="space-y-2">
                   <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Apna naam" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" />
-                  <div className="flex gap-2"><input type="tel" inputMode="numeric" maxLength={10} value={editPhone} onChange={(e) => setEditPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Mobile number (listing me prefill hoga)" className="flex-1 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveProfileName} disabled={savingName} className="bg-slate-900 text-white px-4 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingName ? '…' : 'Save'}</button></div>
+                  <div className="flex gap-2"><input type="tel" inputMode="numeric" value={editPhone} onChange={(e) => { const d = e.target.value.replace(/\D/g, ''); setEditPhone((d.length > 10 && d.startsWith('91') ? d.slice(2, 12) : d).slice(0, 10)); }} placeholder="Mobile number (listing me prefill hoga)" className="flex-1 p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /><button onClick={saveProfileName} disabled={savingName} className="bg-slate-900 text-white px-4 rounded-xl font-black text-sm active:scale-95 disabled:opacity-60">{savingName ? '…' : 'Save'}</button></div>
                 </div>
               </div>
               <div>
@@ -694,9 +700,9 @@ export default function UserDashboard() {
               </div>
               
               <div className="space-y-3">
-                <div><label className="text-xs font-bold text-gray-500 ml-1">Title</label><input type="text" value={editForm.title} onChange={(e) => setEditForm({...editForm, title: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
+                <div><label className="text-xs font-bold text-gray-500 ml-1">{editForm.listingType === 'service' ? 'Service / Business Name' : 'Title'}</label><input type="text" value={editForm.title} onChange={(e) => setEditForm({...editForm, title: e.target.value})} placeholder={editForm.listingType === 'service' ? 'Business / Service name' : 'Title'} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
                 <div className="flex gap-3">
-                  <div className="flex-1 min-w-0"><label className="text-xs font-bold text-gray-500 ml-1">Rent (₹)</label><input type="number" value={editForm.price} onChange={(e) => setEditForm({...editForm, price: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
+                  <div className="flex-1 min-w-0"><label className="text-xs font-bold text-gray-500 ml-1">{editForm.listingType === 'service' ? 'Price (₹)' : 'Rent (₹)'}</label><input type="number" value={editForm.price} onChange={(e) => setEditForm({...editForm, price: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
                   <div className="flex-1 min-w-0"><label className="text-xs font-bold text-gray-500 ml-1">Mobile No.</label><input type="number" value={editForm.mobile} onChange={(e) => setEditForm({...editForm, mobile: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
                 </div>
                 <div><label className="text-xs font-bold text-gray-500 ml-1">Landmark</label><input type="text" value={editForm.landmark} onChange={(e) => setEditForm({...editForm, landmark: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
@@ -704,14 +710,18 @@ export default function UserDashboard() {
               </div>
 
               <div>
-                <p className="text-xs font-black text-gray-500 mb-2 uppercase">Update Facilities</p>
-                <div className="flex flex-wrap gap-2">
-                  {(sysSettings.facilities || []).map(fac => (
-                    <button type="button" key={fac} onClick={() => setEditForm({...editForm, description: editForm.description.includes(fac) ? editForm.description.filter(f => f !== fac) : [...editForm.description, fac]})} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-colors ${editForm.description.includes(fac) ? 'bg-brand text-white border-brand shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                      {fac}
-                    </button>
-                  ))}
-                </div>
+                <p className="text-xs font-black text-gray-500 mb-2 uppercase">{editForm.listingType === 'service' ? 'Service Details' : 'Update Facilities'}</p>
+                {editForm.listingType === 'service' ? (
+                  <textarea rows={3} value={editForm.description[0] || ''} onChange={(e) => setEditForm({...editForm, description: [e.target.value]})} placeholder="Kya service dete hain, timing, rate, delivery area..." className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border resize-none" />
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {(sysSettings.facilities || []).map(fac => (
+                      <button type="button" key={fac} onClick={() => setEditForm({...editForm, description: editForm.description.includes(fac) ? editForm.description.filter(f => f !== fac) : [...editForm.description, fac]})} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-colors ${editForm.description.includes(fac) ? 'bg-brand text-white border-brand shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                        {fac}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

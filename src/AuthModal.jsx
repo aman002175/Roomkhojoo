@@ -371,10 +371,9 @@ export default function AuthModal({ open, mode = 'login', onClose, onModeChange,
                   type="tel"
                   inputMode="numeric"
                   autoComplete="tel"
-                  maxLength={10}
                   placeholder="10-digit mobile (listing me prefill hoga)"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  onChange={(e) => { const d = e.target.value.replace(/\D/g, ''); setPhone((d.length > 10 && d.startsWith('91') ? d.slice(2, 12) : d).slice(0, 10)); }}
                   disabled={Boolean(busy)}
                 />
               </>

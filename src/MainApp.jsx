@@ -666,6 +666,8 @@ export default function MainApp() {
   const resetPostForm = () => {
     setIsPostAdOpen(false); setShowPaymentWindow(false); setIsPickingLocation(false);
     setPostKind('room'); setPostTitle(''); setPostPrice(''); setPostDesc(''); setPostMobile(savedUserPhone()); setPostLandmark(''); setPostMapUrl('');
+    const defaultCat = (sysSettings.categories && sysSettings.categories[0]) || 'PG';
+    setPostCategory(defaultCat); setPostType(typesForCategory(defaultCat)[0]);
     setSelectedFacilities([]); setPoiSelected([]); pickSnapshotRef.current = null; pickCanceledRef.current = false;
     setPostLng(null); setPostLat(null); setGpsAccuracy(null);
     setAdType('regular'); setPromoPlan('7'); setWantBanner(false);
@@ -1432,7 +1434,11 @@ export default function MainApp() {
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-h-[42dvh] overflow-y-auto bg-white rounded-2xl shadow-2xl z-[100] p-3 border border-gray-100">
               <button onClick={closeRoomPopup} className="absolute top-2 right-2 w-8 h-8 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-600 z-10"><X size={18}/></button>
             <div className="flex gap-3 mb-2"><div className="flex gap-2 overflow-x-auto shrink-0 max-w-[45%] no-scrollbar">{roomGallery(selectedRoom).map((u, i) => (<img key={i} src={getImageUrl(u)} className="w-16 h-16 object-cover rounded-xl bg-gray-200 shrink-0 border border-gray-100" alt={`Room ${i + 1}`} />))}</div><div className="flex-1"><div className="flex justify-between items-start pr-10"><h3 className="font-black text-gray-800 line-clamp-1">{selectedRoom.title}</h3><span className="bg-brand/10 text-brand px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-1">{selectedRoom.listingType === 'service' ? 'Service' : selectedRoom.category}</span></div><p className="text-brand font-black text-xl leading-none mt-1">{selectedRoom.price}</p><p className="text-[11px] font-bold text-gray-500 mt-1.5 flex items-center gap-1"><User size={12}/> {selectedRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {revealedContacts[selectedRoom._id] ? `+91 ${revealedContacts[selectedRoom._id]}` : '••••• •••••'}</p></div></div>
-            {selectedRoom.description && (<div className="flex gap-1.5 mb-2 pt-2 border-t border-gray-50 overflow-x-auto no-scrollbar flex-nowrap">{selectedRoom.description.split(', ').map(fac => (<span key={fac} className="bg-gray-50 text-gray-600 border px-2 py-1 rounded-md text-[9px] font-bold uppercase shrink-0">{fac}</span>))}</div>)}
+            {selectedRoom.description && (selectedRoom.listingType === 'service' ? (
+              <p className="mb-2 border-t border-gray-50 pt-2 text-[11px] font-semibold leading-relaxed text-gray-600">{selectedRoom.description}</p>
+            ) : (
+              <div className="flex gap-1.5 mb-2 pt-2 border-t border-gray-50 overflow-x-auto no-scrollbar flex-nowrap">{selectedRoom.description.split(', ').map(fac => (<span key={fac} className="bg-gray-50 text-gray-600 border px-2 py-1 rounded-md text-[9px] font-bold uppercase shrink-0">{fac}</span>))}</div>
+            ))}
             {Array.isArray(selectedRoom.landmarks) && selectedRoom.landmarks.length > 0 && (<div className="bg-purple-50 border border-purple-100 rounded-xl p-2 mb-2"><p className="text-[10px] font-black text-purple-700 uppercase mb-1 flex items-center gap-1"><MapPin size={12} /> Aas-paas ki jagah</p>{selectedRoom.landmarks.map((l, i) => (<p key={i} className="text-[11px] font-bold text-gray-700 flex items-center gap-1"><PoiIcon cat={l.cat} size={12} /><span>{l.name} — <span className="text-purple-700">{fmtDist(l.distM)}</span></span></p>))}</div>)}
             <div className="flex gap-2 items-center mb-3">
               {reportedIds.includes(selectedRoom._id) ? (<span className="text-[10px] bg-gray-100 text-gray-400 px-2 py-1 rounded border border-gray-200 font-bold shrink-0">Reported</span>) : (<button onClick={() => handleReportUnavailable(selectedRoom._id)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100 active:scale-95 font-bold shrink-0">Unavailable?</button>)}<button onClick={() => toggleFavorite(selectedRoom._id)} className="text-[10px] bg-pink-50 text-pink-600 px-2 py-1 rounded border border-pink-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1">{savedIds.includes(selectedRoom._id) ? (<><Heart size={12} fill="currentColor" /> Saved</>) : (<><Heart size={12} /> Save</>)}</button><button onClick={() => setShareRoom(selectedRoom)} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 active:scale-95 font-bold shrink-0 inline-flex items-center gap-1"><Share2 size={12} /> Share</button>
@@ -1522,7 +1528,7 @@ export default function MainApp() {
                </div>
                <div className="flex gap-3">
                  <input type="number" value={postPrice} onChange={(e) => setPostPrice(e.target.value)} placeholder={postKind === 'service' ? 'Price (₹)' : 'Rent (₹)/Month'} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
-                 <input type="tel" inputMode="numeric" maxLength={10} value={postMobile} onChange={(e) => setPostMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Mobile No." className="flex-[1.5] min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
+                 <input type="tel" inputMode="numeric" value={postMobile} onChange={(e) => { const d = e.target.value.replace(/\D/g, ''); setPostMobile((d.length > 10 && d.startsWith('91') ? d.slice(2, 12) : d).slice(0, 10)); }} placeholder="Mobile No." className="flex-[1.5] min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
                </div>
                <p className="text-[10px] font-bold text-gray-400 ml-1">Mobile signup/profile se prefill hai — chaahein toh badal ya hata kar naya number daalein.</p>
              </div>
