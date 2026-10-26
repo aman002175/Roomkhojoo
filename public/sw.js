@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roomkhojo-cache-v3';
+const CACHE_NAME = 'roomkhojo-cache-v4';
 
 // App install hote hi background me ready ho jana
 self.addEventListener('install', () => {
