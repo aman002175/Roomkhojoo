@@ -460,6 +460,11 @@ export default function UserDashboard() {
                 const daysLeft = getDaysLeft(room.expiryDate, room.promoPlan);
                 const isExpired = daysLeft !== null && daysLeft <= 0;
                 const isExpiringSoon = daysLeft !== null && daysLeft > 0 && daysLeft <= 3;
+                const serviceDaysLeft = room.listingType === 'service' && room.serviceExpiresAt
+                  ? Math.ceil((new Date(room.serviceExpiresAt) - new Date()) / (1000 * 60 * 60 * 24))
+                  : null;
+                const serviceExpired = serviceDaysLeft !== null && serviceDaysLeft <= 0;
+                const serviceExpiringSoon = serviceDaysLeft !== null && serviceDaysLeft > 0 && serviceDaysLeft <= 3;
 
                 return (
                     <div key={room._id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 p-3 flex flex-col gap-2 relative">
@@ -469,18 +474,28 @@ export default function UserDashboard() {
                             Verification Pending (Hidden)
                           </div>
                         )}
-                        {room.isApproved && isExpired && (
+                        {room.listingType !== 'service' && room.isApproved && isExpired && (
                           <div className="absolute top-0 left-0 right-0 bg-blue-500 text-white text-[10px] font-black text-center py-1 uppercase tracking-widest z-10 shadow-sm flex items-center justify-center gap-1">
                             <AlertTriangle size={12} /> Promo khatam — Normal ad live hai
                           </div>
                         )}
-                        {room.isApproved && isExpiringSoon && (
+                        {room.listingType !== 'service' && room.isApproved && isExpiringSoon && (
                           <div className="absolute top-0 left-0 right-0 bg-orange-500 text-white text-[10px] font-black text-center py-1 uppercase tracking-widest z-10 shadow-sm flex items-center justify-center gap-1">
                             <Clock size={12} /> Expiring in {daysLeft} Days
                           </div>
                         )}
+                        {room.listingType === 'service' && room.isApproved && serviceExpired && (
+                          <div className="absolute top-0 left-0 right-0 bg-blue-500 text-white text-[10px] font-black text-center py-1 uppercase tracking-widest z-10 shadow-sm flex items-center justify-center gap-1">
+                            <AlertTriangle size={12} /> Service listing khatam — dobara list karein
+                          </div>
+                        )}
+                        {room.listingType === 'service' && room.isApproved && serviceExpiringSoon && (
+                          <div className="absolute top-0 left-0 right-0 bg-orange-500 text-white text-[10px] font-black text-center py-1 uppercase tracking-widest z-10 shadow-sm flex items-center justify-center gap-1">
+                            <Clock size={12} /> Service listing {serviceDaysLeft} din me khatam
+                          </div>
+                        )}
 
-                        <div className={`flex gap-4 ${(!room.isApproved || isExpired) ? 'mt-4 opacity-80' : isExpiringSoon ? 'mt-4' : ''}`}>
+                        <div className={`flex gap-4 ${(!room.isApproved || isExpired || serviceExpired) ? 'mt-4 opacity-80' : (isExpiringSoon || serviceExpiringSoon) ? 'mt-4' : ''}`}>
                           <img src={getImageUrl(room.image)} className="w-24 h-24 rounded-2xl object-cover bg-gray-200 shrink-0 border border-gray-100" alt="Room" />
                           <div className="flex-1 py-1 flex flex-col justify-between">
                               <div>
@@ -489,6 +504,9 @@ export default function UserDashboard() {
                                       {room.isPromoted && !isExpired && <span className="text-[10px] bg-orange-100 text-orange-600 px-2 py-1 rounded-lg font-black uppercase shrink-0 ml-2 inline-flex items-center gap-1"><Star size={10} fill="currentColor" /> Promoted</span>}
                                   </div>
                                   <p className="text-brand font-black mt-1">{room.price}</p>
+                                  {room.listingType === 'service' && room.serviceDays > 0 && (
+                                    <p className="text-[10px] font-bold text-purple-600 mt-0.5">Listing {room.serviceDays} din • ₹{room.serviceDailyRate || 0}/day • Fee ₹{room.serviceFee || 0}</p>
+                                  )}
                                   <p className="text-xs font-bold text-gray-400 mt-1 flex items-center gap-1"><MapPin size={12}/> {room.landmark || 'Hanumangarh'}</p>
                               </div>
                               <div className="mt-2 flex items-center gap-2">
@@ -502,8 +520,8 @@ export default function UserDashboard() {
                                 {room.listingType === 'service' && (
                                   <span className="text-[10px] font-black px-2 py-1 rounded-lg bg-purple-50 text-purple-700">Service</span>
                                 )}
-                                {daysLeft !== null && daysLeft > 3 && (
-                                  <span className="text-[10px] font-bold text-gray-500">{daysLeft} Days Left</span>
+                                {((daysLeft !== null && daysLeft > 3) || (serviceDaysLeft !== null && serviceDaysLeft > 3)) && (
+                                  <span className="text-[10px] font-bold text-gray-500">{serviceDaysLeft ?? daysLeft} Days Left</span>
                                 )}
                               </div>
                           </div>

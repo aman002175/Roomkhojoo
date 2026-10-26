@@ -255,6 +255,7 @@ export default function MainApp() {
   const [payCode, setPayCode] = useState('');
 
   const [postKind, setPostKind] = useState('room'); // room | service
+  const [postDays, setPostDays] = useState('30'); // service listing duration (admin rate × days)
   const [postTitle, setPostTitle] = useState('');
   const [postPrice, setPostPrice] = useState(''); 
   const [postDesc, setPostDesc] = useState('');
@@ -301,11 +302,16 @@ export default function MainApp() {
 
   const [sysSettings, setSysSettings] = useState({
     categories: ['PG', 'Flat', 'Hostel', 'Library', 'Office'],
-    pricing: { regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: 'admin@ybl', bannerPrice: '499', bannerDays: '7' }
+    pricing: { regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: 'admin@ybl', bannerPrice: '499', bannerDays: '7', serviceDailyRate: '0' }
   });
 
   // Hotfix: batch-9 refactor me ye definition galti se delete ho gayi thi — chips row "dynamicCategories is not defined" crash karta tha
-  const dynamicCategories = [{ id: 'all', name: 'All Rooms' }, { id: '__services', name: 'Services' }, ...(sysSettings.categories || []).map(cat => ({ id: cat, name: cat }))];
+  const dynamicCategories = [{ id: 'all', name: 'All Rooms' }, ...(sysSettings.categories || []).map(cat => ({ id: cat, name: cat }))];
+  const isServiceView = activeCategory === '__services';
+  const serviceListingCount = rooms.filter(r => r.listingType === 'service').length;
+  const serviceDailyRate = Math.max(0, Math.floor(Number(sysSettings.pricing && sysSettings.pricing.serviceDailyRate) || 0));
+  const serviceDaysNum = Math.max(0, Math.floor(Number(postDays) || 0));
+  const serviceFee = serviceDailyRate * serviceDaysNum;
 
   // P1 #33: rooms load-fail par misleading "koi result nahi" nahi — error card + Retry
   const [roomsError, setRoomsError] = useState(false);
@@ -482,6 +488,7 @@ export default function MainApp() {
   };
 
   const getAdAmount = () => {
+    if (postKind === 'service') return String(serviceFee);
     if (adType === 'regular') return sysSettings.pricing.regular;
     if (promoPlan === '7') return sysSettings.pricing.promo7;
     if (promoPlan === '15') return sysSettings.pricing.promo15;
@@ -492,7 +499,7 @@ export default function MainApp() {
   // Total = ad amount + banner add-on (dono admin-pricing se)
   const getPayAmount = () => {
     const ad = Number(getAdAmount() || 0);
-    const banner = wantBanner ? Number(sysSettings.pricing.bannerPrice || 0) : 0;
+    const banner = wantBanner && postKind !== 'service' ? Number(sysSettings.pricing.bannerPrice || 0) : 0;
     return String(ad + banner);
   };
 
@@ -584,6 +591,10 @@ export default function MainApp() {
   const initiatePayment = () => {
     if(!postTitle || !postPrice || !postMobile) return alert(postKind === 'service' ? "Service name, Price aur Mobile zaroori hai!" : "Title, Price aur Mobile zaroori hai!");
     if (!/^[6-9]\d{9}$/.test(String(postMobile).replace(/\D/g, '').slice(-10))) return alert("Sahi 10-digit mobile number dalein.");
+    if (postKind === 'service') {
+      const days = Number(postDays);
+      if (!Number.isInteger(days) || days < 1 || days > 365) return alert('Service listing duration 1 se 365 din ke beech chunein.');
+    }
     if(!postLng || !postLat) return alert("Kripya map par location select karein! 'Map' button par click karein ya Live Location chunein.");
     const amount = getPayAmount();
     if (amount === '0' || amount === '') {
@@ -608,6 +619,7 @@ export default function MainApp() {
     try {
       const fd = new FormData();
       fd.append('listingType', postKind);
+      if (postKind === 'service') fd.append('serviceDays', String(serviceDaysNum));
       fd.append('title', postTitle); fd.append('price', `₹${postPrice}`); fd.append('category', postCategory); fd.append('type', postKind === 'service' ? 'Service' : postType); fd.append('landmark', postLandmark); fd.append('mobile', postMobile);
       fd.append('description', postKind === 'service' ? postDesc.trim() : selectedFacilities.join(', '));
       fd.append('lng', postLng); fd.append('lat', postLat); fd.append('isPromoted', adType === 'promo');
@@ -665,7 +677,7 @@ export default function MainApp() {
   // P2 #45: submit ke baad PURA form reset — landmark/category/pin/plan kuch bhi stale na rahe
   const resetPostForm = () => {
     setIsPostAdOpen(false); setShowPaymentWindow(false); setIsPickingLocation(false);
-    setPostKind('room'); setPostTitle(''); setPostPrice(''); setPostDesc(''); setPostMobile(savedUserPhone()); setPostLandmark(''); setPostMapUrl('');
+    setPostKind('room'); setPostDays('30'); setPostTitle(''); setPostPrice(''); setPostDesc(''); setPostMobile(savedUserPhone()); setPostLandmark(''); setPostMapUrl('');
     const defaultCat = (sysSettings.categories && sysSettings.categories[0]) || 'PG';
     setPostCategory(defaultCat); setPostType(typesForCategory(defaultCat)[0]);
     setSelectedFacilities([]); setPoiSelected([]); pickSnapshotRef.current = null; pickCanceledRef.current = false;
@@ -739,9 +751,12 @@ export default function MainApp() {
 
   // useMemo: har render par nayi array NA banao — warna markers bekaar me rebuild (flicker)
   const filteredRooms = useMemo(() => rooms.filter(r => {
-    const matchesCategory = activeCategory === 'all'
-      || (activeCategory === '__services' ? r.listingType === 'service' : r.category === activeCategory);
-    const matchesAudience = activeCategory === '__services' || activeAudience === 'all' || (r.type || '') === activeAudience;
+    const isServiceRoom = r.listingType === 'service';
+    // Room tab me sirf rooms; Service tab me sirf service providers.
+    const matchesCategory = activeCategory === '__services'
+      ? isServiceRoom
+      : (activeCategory === 'all' ? !isServiceRoom : (!isServiceRoom && r.category === activeCategory));
+    const matchesAudience = isServiceRoom || activeAudience === 'all' || (r.type || '') === activeAudience;
     const price = priceNum(r.price);
     const okMin = minPrice === '' || price >= Number(minPrice);
     const okMax = maxPrice === '' || price <= Number(maxPrice);
@@ -1317,8 +1332,13 @@ export default function MainApp() {
       {isOffline && (<div className="z-50 bg-amber-500 text-white text-center text-xs font-black py-1.5 px-3 shrink-0">Aap offline hain — internet check karein. Purane ads dikh rahe hain.</div>)}
       <div className="z-40 bg-white shadow-sm shrink-0">
         <header className="px-3 py-1.5 flex justify-between items-center border-b border-gray-50"><div className="flex items-center gap-2"><button onClick={() => setIsMenuOpen(true)} className="p-1.5 -ml-1 text-gray-600 active:scale-95"><Menu size={24} /></button><div className="flex flex-col"><h1 className="text-xl font-black text-gray-800 tracking-tighter leading-tight">Room<span className="text-brand">Khojo</span></h1><a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="text-[10px] font-bold text-gray-500 hover:opacity-80 transition-opacity leading-none mt-0.5 tracking-tight">Built with <Heart size={10} fill="currentColor" className="inline text-brand" /> by <span className="text-brand">29 Dev's</span></a></div></div><button onClick={() => isLoggedIn ? navigate('/dashboard') : setAuthMode('login')} className={`w-9 h-9 border rounded-full flex items-center justify-center active:scale-95 transition-all ${isLoggedIn ? 'bg-brand text-white border-brand shadow-lg shadow-brand/30' : 'bg-gray-50 text-gray-600'}`}><User size={20} /></button></header>
-        <div className="px-3 pt-2"><div className="relative flex items-center"><Search className="absolute left-3 text-gray-400" size={18} /><input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={handleMapSearch} placeholder="Enter city (e.g. Ganganagar) & Search..." className="w-full bg-gray-100 text-sm font-bold text-gray-700 rounded-2xl py-2 pl-10 pr-20 outline-none border border-transparent focus:border-brand/30 transition-colors"/><button onClick={handleMapSearch} className="absolute right-2 bg-brand text-white text-xs font-black px-3 py-1.5 rounded-xl active:scale-95 transition-transform shadow-md flex items-center gap-1">Go <Send size={13} /></button></div></div>
-        <div className="flex overflow-x-auto no-scrollbar py-2 px-3 gap-2">{dynamicCategories.map((cat) => { const Icon = catIcon(cat.id); return (<button key={cat.id} onClick={() => { setActiveCategory(cat.id); setActiveAudience('all'); }} className={`flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-2xl text-[13px] font-bold whitespace-nowrap ${activeCategory === cat.id ? 'bg-brand text-white shadow-lg shadow-brand/30 scale-105' : 'bg-gray-100 text-gray-600'}`}><Icon size={16} /><span>{cat.name}</span></button>); })}</div>
+         <div className="px-3 pt-2"><div className="relative flex items-center"><Search className="absolute left-3 text-gray-400" size={18} /><input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={handleMapSearch} placeholder={isServiceView ? 'Service ya area search karein...' : 'Enter city (e.g. Ganganagar) & Search...'} className="w-full bg-gray-100 text-sm font-bold text-gray-700 rounded-2xl py-2 pl-10 pr-20 outline-none border border-transparent focus:border-brand/30 transition-colors"/><button onClick={handleMapSearch} className="absolute right-2 bg-brand text-white text-xs font-black px-3 py-1.5 rounded-xl active:scale-95 transition-transform shadow-md flex items-center gap-1">Go <Send size={13} /></button></div></div>
+         <div className="grid grid-cols-2 gap-1 mx-3 my-2 p-1 bg-gray-100 border rounded-2xl">
+           <button onClick={() => { setActiveCategory('all'); setActiveAudience('all'); }} className={`py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all ${!isServiceView ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-500'}`}><Home size={16} /> Rooms</button>
+           <button onClick={() => { setActiveCategory('__services'); setActiveAudience('all'); }} className={`py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all ${isServiceView ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-500'}`}><Briefcase size={16} /> Service Providers {serviceListingCount > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${isServiceView ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-500'}`}>{serviceListingCount}</span>}</button>
+         </div>
+         {!isServiceView && (<div className="flex overflow-x-auto no-scrollbar py-2 px-3 gap-2">{dynamicCategories.map((cat) => { const Icon = catIcon(cat.id); return (<button key={cat.id} onClick={() => { setActiveCategory(cat.id); setActiveAudience('all'); }} className={`flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-2xl text-[13px] font-bold whitespace-nowrap ${activeCategory === cat.id ? 'bg-brand text-white shadow-lg shadow-brand/30 scale-105' : 'bg-gray-100 text-gray-600'}`}><Icon size={16} /><span>{cat.name}</span></button>); })}</div>)}
+         {isServiceView && (<div className="px-3 pb-2 flex items-center justify-between"><p className="text-[11px] font-black text-gray-600 flex items-center gap-1"><Briefcase size={12} className="text-purple-600" /> Service Providers</p><span className="text-[10px] font-bold text-gray-400">{serviceListingCount} listed</span></div>)}
         {/* 🔍 FILTERS (price + sort + radius) */}
         <div className="px-3 pb-2">
           <button onClick={() => setFiltersOpen(!filtersOpen)} className="flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-2xl text-xs font-black text-gray-600 active:scale-95"><Search size={14} /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}<span>{filtersOpen ? '▲' : '▼'}</span></button>
@@ -1413,7 +1433,7 @@ export default function MainApp() {
         
         <div className={`absolute inset-0 z-20 bg-background overflow-y-auto p-4 transition-transform duration-500 ${view === 'list' ? 'translate-y-0' : 'translate-y-full'}`}>
           <div className="grid gap-5 pb-32">
-            {roomsError ? (<div className="text-center p-10"><AlertTriangle size={28} className="mx-auto text-amber-500 mb-2" /><p className="text-gray-600 font-bold text-sm mb-3">Ads load nahi ho paye. Internet check karein.</p><button onClick={() => setRoomsReloadKey(k => k + 1)} className="bg-brand text-white px-5 py-2.5 rounded-xl font-black text-sm active:scale-95">Retry</button></div>) : sortedRooms.length === 0 ? (<div className="text-center p-10 text-gray-500 font-bold">Koi result nahi mila.</div>) : (sortedRooms.map(room => (
+            {roomsError ? (<div className="text-center p-10"><AlertTriangle size={28} className="mx-auto text-amber-500 mb-2" /><p className="text-gray-600 font-bold text-sm mb-3">Ads load nahi ho paye. Internet check karein.</p><button onClick={() => setRoomsReloadKey(k => k + 1)} className="bg-brand text-white px-5 py-2.5 rounded-xl font-black text-sm active:scale-95">Retry</button></div>) : sortedRooms.length === 0 ? (<div className="text-center p-10 text-gray-500 font-bold">{isServiceView ? 'Koi service provider nahi mila.' : 'Koi result nahi mila.'}</div>) : (sortedRooms.map(room => (
               <div key={room._id} className={`bg-white rounded-3xl overflow-hidden shadow-md border ${room.isPromoted ? 'border-orange-200' : 'border-gray-50'}`}>
                 <div className="relative"><img src={getImageUrl(room.image)} className="w-full h-48 object-cover bg-gray-200" alt="Room" />{isFeatured(room) && <div className="absolute top-3 left-3 bg-orange-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1"><Star size={10} fill="currentColor" /> Featured</div>}<div className="absolute top-3 right-3 bg-white/90 px-3 py-1 rounded-full text-brand font-black">{room.price}</div></div>
                 <div className="p-4">
@@ -1494,7 +1514,7 @@ export default function MainApp() {
           <div className="p-5 overflow-y-auto overflow-x-hidden space-y-5 flex-1">
              <div className="grid grid-cols-2 gap-1 rounded-2xl bg-gray-100 p-1 border">
                <button type="button" onClick={() => { setPostKind('room'); setAdType('regular'); setWantBanner(false); setPostCategory((sysSettings.categories && sysSettings.categories[0]) || 'PG'); setPostType(typesForCategory((sysSettings.categories && sysSettings.categories[0]) || 'PG')[0]); }} className={`py-3 rounded-xl font-black text-sm transition-all ${postKind === 'room' ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-400'}`}>Room / Property</button>
-               <button type="button" onClick={() => { setPostKind('service'); setAdType('regular'); setWantBanner(false); setPostCategory(SERVICE_CATEGORIES[0]); setPostType('Service'); }} className={`py-3 rounded-xl font-black text-sm transition-all ${postKind === 'service' ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-400'}`}>Service Provider</button>
+                <button type="button" onClick={() => { setPostKind('service'); setAdType('regular'); setWantBanner(false); setPostCategory(SERVICE_CATEGORIES[0]); setPostType('Service'); if (!postDays) setPostDays('30'); }} className={`py-3 rounded-xl font-black text-sm transition-all ${postKind === 'service' ? 'bg-white text-gray-900 shadow-sm border' : 'text-gray-400'}`}>Service Provider</button>
              </div>
              {postKind === 'room' && (
                <>
@@ -1511,7 +1531,7 @@ export default function MainApp() {
               ) : (
                 <div className="flex items-start gap-2.5 rounded-2xl border border-purple-200 bg-purple-50 p-3">
                   <Megaphone size={18} className="mt-0.5 shrink-0 text-purple-600" />
-                  <p className="text-[11px] font-bold leading-relaxed text-purple-800">Service provider ads admin approval ke baad map ke upar banner strip me automatically dikhte hain — alag banner payment ki zaroorat nahi.</p>
+                  <p className="text-[11px] font-bold leading-relaxed text-purple-800">Service provider ads admin approval ke baad {serviceDaysNum || 0} din tak map ke upar banner strip me automatically dikhte hain — alag banner payment ki zaroorat nahi.</p>
                 </div>
               )}
              <div className="space-y-3">
@@ -1527,17 +1547,36 @@ export default function MainApp() {
                  )}
                </div>
                <div className="flex gap-3">
-                 <input type="number" value={postPrice} onChange={(e) => setPostPrice(e.target.value)} placeholder={postKind === 'service' ? 'Price (₹)' : 'Rent (₹)/Month'} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
+                  <input type="number" value={postPrice} onChange={(e) => setPostPrice(e.target.value)} placeholder={postKind === 'service' ? 'Service price (₹)' : 'Rent (₹)/Month'} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
                  <input type="tel" inputMode="numeric" value={postMobile} onChange={(e) => { const d = e.target.value.replace(/\D/g, ''); setPostMobile((d.length > 10 && d.startsWith('91') ? d.slice(2, 12) : d).slice(0, 10)); }} placeholder="Mobile No." className="flex-[1.5] min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
                </div>
-               <p className="text-[10px] font-bold text-gray-400 ml-1">Mobile signup/profile se prefill hai — chaahein toh badal ya hata kar naya number daalein.</p>
-             </div>
-             {postKind === 'service' ? (
-               <div>
-                 <p className="text-xs font-black text-gray-500 mb-2 uppercase">Service Details</p>
-                 <textarea value={postDesc} onChange={(e) => setPostDesc(e.target.value)} rows={3} placeholder="Kya service dete hain, timing, monthly rate, delivery area..." className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm resize-none" />
-               </div>
-             ) : (
+                <p className="text-[10px] font-bold text-gray-400 ml-1">Mobile signup/profile se prefill hai — chaahein toh badal ya hata kar naya number daalein.</p>
+                {postKind === 'service' && (<p className="text-[10px] font-bold text-purple-500 ml-1">Service price customer ko dikhega; listing fee duration ke hisaab se neeche hai.</p>)}
+              </div>
+              {postKind === 'service' ? (
+                <div>
+                  <p className="text-xs font-black text-gray-500 mb-2 uppercase">Service Details</p>
+                  <textarea value={postDesc} onChange={(e) => setPostDesc(e.target.value)} rows={3} placeholder="Kya service dete hain, timing, delivery area..." className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm resize-none" />
+                  <div className="mt-3 rounded-2xl border-2 border-purple-200 bg-purple-50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-black uppercase text-purple-800">Listing Duration</p>
+                      <span className="text-[11px] font-black text-purple-700 bg-white border border-purple-200 px-2 py-1 rounded-lg">₹{serviceDailyRate}/day</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mt-2">
+                      {[7, 15, 30].map(d => (<button type="button" key={d} onClick={() => setPostDays(String(d))} className={`py-2 rounded-xl text-xs font-black border transition-colors ${Number(postDays) === d ? 'bg-purple-600 text-white border-purple-600 shadow-sm' : 'bg-white text-purple-700 border-purple-200'}`}>{d} din</button>))}
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <input type="number" min="1" max="365" step="1" value={postDays} onChange={(e) => setPostDays(e.target.value)} placeholder="Custom days" className="flex-1 min-w-0 p-3 bg-white rounded-xl outline-none font-bold text-sm border border-purple-200" />
+                      <span className="text-xs font-bold text-gray-500">din</span>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-purple-200 flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-gray-600">₹{serviceDailyRate} × {serviceDaysNum} din =</span>
+                      <span className="text-lg font-black text-purple-800">{serviceDailyRate > 0 ? `₹${serviceFee}` : 'Free'}</span>
+                    </div>
+                    <p className="text-[10px] font-bold text-purple-600 mt-1">Listing fee payment submit par; admin approval ke baad {serviceDaysNum || 0} din duration start hogi.</p>
+                  </div>
+                </div>
+              ) : (
                <div><p className="text-xs font-black text-gray-500 mb-2 uppercase">Select Facilities</p><div className="flex flex-wrap gap-2">{(sysSettings.facilities || []).map(fac => (<button type="button" key={fac} onClick={() => setSelectedFacilities(prev => prev.includes(fac) ? prev.filter(f => f !== fac) : [...prev, fac])} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${selectedFacilities.includes(fac) ? 'bg-brand text-white border-brand shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>{fac}</button>))}</div></div>
              )}
               <div className="flex flex-wrap gap-2 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 min-w-[140px] p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button onClick={refreshGpsPin} disabled={isLocating} title="GPS se refresh" className="p-3 shrink-0 rounded-2xl font-black text-xs flex items-center justify-center border-2 bg-gray-50 text-gray-600 border-gray-200 active:scale-95 disabled:opacity-60">{isLocating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button><button onClick={startPickingLocation} className={`p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLng ? 'bg-green-50 text-green-600 border-green-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={16}/> {postLng ? (gpsAccuracy ? `Pinned! ±${gpsAccuracy}m` : 'Pinned!') : 'Map'}</button><button onClick={openPoiPicker} className="p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={16} /> Nearby</button></div>
@@ -1559,7 +1598,7 @@ export default function MainApp() {
       {showPaymentWindow && (
         <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative">
-            <div className="bg-orange-500 text-white p-6 text-center"><p className="font-bold text-orange-100 text-sm mb-1 uppercase tracking-wider">Payment Required</p><h2 className="text-4xl font-black">₹{getPayAmount()}</h2></div>
+            <div className="bg-orange-500 text-white p-6 text-center"><p className="font-bold text-orange-100 text-sm mb-1 uppercase tracking-wider">Payment Required</p><h2 className="text-4xl font-black">₹{getPayAmount()}</h2>{postKind === 'service' && (<p className="text-[11px] font-bold text-orange-100 mt-1">Service listing • {serviceDaysNum} din • approval ke baad duration start</p>)}</div>
             <div className="p-6 text-center">
               <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-2xl"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Your Secret Payment Code</p><h3 className="text-3xl font-black tracking-widest text-gray-800">{payCode}</h3></div>
               <div className="flex items-start gap-3 bg-blue-50 text-blue-800 p-4 rounded-2xl text-left text-xs font-bold mb-6"><AlertTriangle size={24} className="shrink-0 text-blue-600 mt-0.5" /><p>Niche 'Pay via UPI App' par click karein. Aapki UPI app open hogi. <strong>Payment karne ke baad wapas yahan aakar 'I have paid' par click karna na bhoolein.</strong></p></div>

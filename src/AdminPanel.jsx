@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { User, Users, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft, Search, MoreVertical, Ban, Trash2, Phone, Calendar, RefreshCw } from 'lucide-react';
+import { User, Users, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft, Search, MoreVertical, Ban, Trash2, Phone, Calendar, RefreshCw, Briefcase } from 'lucide-react';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (admin token)
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -60,7 +60,7 @@ export default function AdminPanel() {
 
   const [sysCategories, setSysCategories] = useState([]);
   const [sysFacilities, setSysFacilities] = useState([]);
-  const [sysPricing, setSysPricing] = useState({ regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: '' });
+  const [sysPricing, setSysPricing] = useState({ regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: '', bannerPrice: '499', bannerDays: '7', serviceDailyRate: '0' });
   const [sysAutoApprove, setSysAutoApprove] = useState(false);
   const [sysAdminPath, setSysAdminPath] = useState('/admin-secret-29');
   const [sysContactLimit, setSysContactLimit] = useState(15); // 📞 number reveal daily limit
@@ -125,7 +125,7 @@ export default function AdminPanel() {
         if (data.success && data.settings) {
           setSysCategories(data.settings.categories || []);
           setSysFacilities(data.settings.facilities || []);
-          setSysPricing(data.settings.pricing || { regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: '' });
+          setSysPricing({ regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: '', bannerPrice: '499', bannerDays: '7', serviceDailyRate: '0', ...(data.settings.pricing || {}) });
           if (typeof data.settings.autoApproveFree === 'boolean') setSysAutoApprove(data.settings.autoApproveFree);
           if (data.settings.adminPath) setSysAdminPath(data.settings.adminPath);
           if (Number.isInteger(data.settings.contactRevealLimit)) setSysContactLimit(data.settings.contactRevealLimit);
@@ -372,12 +372,16 @@ export default function AdminPanel() {
     return null;
   };
   const validatePricing = (p) => {
-    const fields = { regular: 'Regular fee', promo7: '7-din promo', promo15: '15-din promo', promo30: '30-din promo', bannerPrice: 'Banner price', bannerDays: 'Banner duration' };
+    const fields = { regular: 'Regular fee', promo7: '7-din promo', promo15: '15-din promo', promo30: '30-din promo', bannerPrice: 'Banner price', bannerDays: 'Banner duration', serviceDailyRate: 'Service per-day rate' };
     for (const [key, label] of Object.entries(fields)) {
       const val = p[key];
       if (val === '' || val === undefined || val === null) continue; // optional khaali chhod sakte ho
       const n = Number(val);
       if (!Number.isFinite(n) || n < 0) return `${label} ki value sahi positive number nahi hai.`;
+    }
+    if (p.serviceDailyRate !== undefined && p.serviceDailyRate !== '') {
+      const rate = Number(p.serviceDailyRate);
+      if (!Number.isInteger(rate) || rate > 100000) return 'Service per-day rate 0 se 100000 ke beech poora number hona chahiye.';
     }
     return null;
   };
@@ -460,6 +464,15 @@ export default function AdminPanel() {
     return diff > 0 ? <span className="text-green-600 font-bold">{diff} Days</span> : <span className="text-red-500 font-bold">Expired</span>;
   };
 
+  const getPlanStatus = (room) => {
+    if (room.listingType === 'service') {
+      if (!room.serviceExpiresAt) return <span className="text-blue-500 font-bold">Approval pending</span>;
+      const diff = Math.ceil((new Date(room.serviceExpiresAt) - new Date()) / (1000 * 60 * 60 * 24));
+      return diff > 0 ? <span className="text-purple-600 font-bold">Service • {diff} Days</span> : <span className="text-red-500 font-bold">Service expired</span>;
+    }
+    return getDaysLeft(room.expiryDate, room.promoPlan);
+  };
+
   const chatTicket = chatTicketId ? tickets.find(x => x._id === chatTicketId) || null : null;
 
   if (!isAuthenticated) {
@@ -485,6 +498,7 @@ export default function AdminPanel() {
   const estRevenue = ((adminRooms.length - promotedCount) * Number(sysPricing.regular || 0)) + (promotedCount * Number(sysPricing.promo7 || 299));
   const uniqueUsersCount = new Set(adminRooms.filter(r => r.userId && r.userId !== 'unknown_user').map(r => r.userId)).size;
   const revenueTotal = stats ? stats.totalRevenue : estRevenue;
+  const serviceDailyRate = Math.max(0, Math.floor(Number(sysPricing.serviceDailyRate) || 0));
 
   return (
     <div className="h-[100dvh] w-full bg-gray-100 flex flex-col font-sans relative overflow-hidden">
@@ -519,7 +533,7 @@ export default function AdminPanel() {
         {/* Analytics Tab */}
         {activeTab === 'analytics' && (
           <div className="space-y-4 pb-10">
-            <div className="grid grid-cols-2 gap-3"><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Registered Users</p><p className="text-2xl font-black text-gray-800">{stats ? (stats.registeredUsers ?? stats.uniqueUsers) : uniqueUsersCount}</p></div><div className="bg-green-50 p-4 rounded-2xl shadow-sm border border-green-100"><p className="text-xs font-bold text-green-700 uppercase">{stats ? 'Revenue (Recorded)' : 'Est. Revenue'}</p><p className="text-2xl font-black text-green-800">₹{revenueTotal}</p>{stats ? (<p className="text-[10px] font-bold text-green-600 mt-1">Promo ₹{stats.promoRevenue} • Banner ₹{stats.bannerRevenue}</p>) : (<p className="text-[10px] font-bold text-green-600 mt-1">Approx — server stats load nahi hue</p>)}</div><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Ads</p><p className="text-2xl font-black text-gray-800">{stats ? stats.totalAds : adminRooms.length}</p><p className="text-[10px] font-bold text-gray-400 mt-1">{stats ? `${stats.liveAds} live • ${stats.pendingAds} pending` : ''}</p></div><div className="bg-orange-50 p-4 rounded-2xl shadow-sm border border-orange-100"><p className="text-xs font-bold text-orange-700 uppercase">Promo Ads</p><p className="text-2xl font-black text-orange-800">{stats ? stats.promoAds : promotedCount}</p>{stats ? (<p className="text-[10px] font-bold text-orange-600 mt-1">Banner LIVE: {stats.bannerActive}</p>) : null}</div></div>
+            <div className="grid grid-cols-2 gap-3"><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Registered Users</p><p className="text-2xl font-black text-gray-800">{stats ? (stats.registeredUsers ?? stats.uniqueUsers) : uniqueUsersCount}</p></div><div className="bg-green-50 p-4 rounded-2xl shadow-sm border border-green-100"><p className="text-xs font-bold text-green-700 uppercase">{stats ? 'Revenue (Recorded)' : 'Est. Revenue'}</p><p className="text-2xl font-black text-green-800">₹{revenueTotal}</p>{stats ? (<p className="text-[10px] font-bold text-green-600 mt-1">Promo ₹{stats.promoRevenue} • Service ₹{stats.serviceRevenue || 0} • Banner ₹{stats.bannerRevenue}</p>) : (<p className="text-[10px] font-bold text-green-600 mt-1">Approx — server stats load nahi hue</p>)}</div><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Ads</p><p className="text-2xl font-black text-gray-800">{stats ? stats.totalAds : adminRooms.length}</p><p className="text-[10px] font-bold text-gray-400 mt-1">{stats ? `${stats.liveAds} live • ${stats.pendingAds} pending${stats.expiredAds ? ` • ${stats.expiredAds} expired` : ''}` : ''}</p></div><div className="bg-orange-50 p-4 rounded-2xl shadow-sm border border-orange-100"><p className="text-xs font-bold text-orange-700 uppercase">Promo Ads</p><p className="text-2xl font-black text-orange-800">{stats ? stats.promoAds : promotedCount}</p>{stats ? (<p className="text-[10px] font-bold text-orange-600 mt-1">Banner LIVE: {stats.bannerActive}</p>) : null}</div></div>
             {stats && (
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
                 <p className="text-xs font-bold text-gray-500 uppercase mb-2">Revenue Breakdown (recorded)</p>
@@ -531,7 +545,7 @@ export default function AdminPanel() {
                 <p className="text-[10px] font-bold text-gray-400 mt-2">Note: sirf un ads ka record jinka payment is fix ke baad approve hua.</p>
               </div>
             )}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mt-4"><div className="p-4 border-b bg-gray-50"><h3 className="font-black text-gray-800 flex items-center gap-2"><Clock size={18}/> Users & Ad Status Report</h3></div><div className="p-0 overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold border-b"><tr><th className="p-3">User/Owner</th><th className="p-3">Ad Title</th><th className="p-3 text-brand">Pay Code</th><th className="p-3">Plan</th><th className="p-3">Status</th><th className="p-3">Action</th></tr></thead><tbody className="divide-y divide-gray-100">{adminRooms.map(room => (<tr key={room._id} className="hover:bg-gray-50"><td className="p-3 font-bold text-gray-800"><div className="flex items-center gap-2"><div className="w-6 h-6 bg-brand/10 text-brand rounded-full flex justify-center items-center text-[10px] shrink-0"><User size={12}/></div>{room.ownerName || 'Owner'}</div></td><td className="p-3 text-gray-600 line-clamp-1 max-w-[150px]">{room.title}</td><td className="p-3 font-black text-brand bg-brand/5 border-x">{room.paymentCode || 'FREE'}</td><td className="p-3">{room.isPromoted ? <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoPlan}D</span> : <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">Regular</span>}</td><td className="p-3">{getDaysLeft(room.expiryDate, room.promoPlan)}</td><td className="p-3"><a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka Ad ("${room.title}") jald hi expire hone wala hai.`)}`} target="_blank" rel="noreferrer" className="bg-[#25D366]/10 text-[#25D366] px-3 py-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform w-fit"><MessageCircle size={14}/> Alert</a></td></tr>))}</tbody></table></div></div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mt-4"><div className="p-4 border-b bg-gray-50"><h3 className="font-black text-gray-800 flex items-center gap-2"><Clock size={18}/> Users & Ad Status Report</h3></div><div className="p-0 overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold border-b"><tr><th className="p-3">User/Owner</th><th className="p-3">Ad Title</th><th className="p-3 text-brand">Pay Code</th><th className="p-3">Plan</th><th className="p-3">Status</th><th className="p-3">Action</th></tr></thead><tbody className="divide-y divide-gray-100">{adminRooms.map(room => (<tr key={room._id} className="hover:bg-gray-50"><td className="p-3 font-bold text-gray-800"><div className="flex items-center gap-2"><div className="w-6 h-6 bg-brand/10 text-brand rounded-full flex justify-center items-center text-[10px] shrink-0"><User size={12}/></div>{room.ownerName || 'Owner'}</div></td><td className="p-3 text-gray-600 line-clamp-1 max-w-[150px]">{room.title}</td><td className="p-3 font-black text-brand bg-brand/5 border-x">{room.paymentCode || 'FREE'}</td><td className="p-3">{room.listingType === 'service' ? <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Briefcase size={11} /> Service {room.serviceDays || 0}D</span> : room.isPromoted ? <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoPlan}D</span> : <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">Regular</span>}</td><td className="p-3">{getPlanStatus(room)}</td><td className="p-3"><a href={`https://wa.me/91${room.mobile}?text=${encodeURIComponent(`Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka Ad ("${room.title}") jald hi expire hone wala hai.`)}`} target="_blank" rel="noreferrer" className="bg-[#25D366]/10 text-[#25D366] px-3 py-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform w-fit"><MessageCircle size={14}/> Alert</a></td></tr>))}</tbody></table></div></div>
           </div>
         )}
 
@@ -634,7 +648,9 @@ export default function AdminPanel() {
                 <div className="bg-orange-50 border border-orange-200 p-3 rounded-xl flex justify-between items-center shadow-inner">
                   <p className="text-xs font-bold text-orange-800">Pay Code: <span className="font-black text-lg tracking-widest ml-1">{room.paymentCode || 'FREE'}</span>{room.paymentRef ? (<span className="block text-[10px] mt-0.5">UPI Ref: {room.paymentRef}</span>) : null}</p>
                   <span className="text-[10px] font-black bg-white px-2 py-1 rounded-md text-orange-600 shadow-sm border border-orange-100">
-                    {(room.promoRequested && room.promoRequested !== 'regular') ? (<span className="inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoRequested} Days — payment verify karke Approve dabayein</span>) : 'Regular Ad'}
+                    {room.listingType === 'service'
+                      ? (<span className="inline-flex items-center gap-1"><Briefcase size={11} /> Service {room.serviceDays || 0} Days • Fee ₹{room.serviceFee || 0} — payment verify karke Approve dabayein</span>)
+                      : ((room.promoRequested && room.promoRequested !== 'regular') ? (<span className="inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoRequested} Days — payment verify karke Approve dabayein</span>) : 'Regular Ad')}
                   </span>
                 </div>
                 {room.bannerRequested && !room.isBannerActive && (
@@ -708,7 +724,7 @@ export default function AdminPanel() {
                 )}
                 <div className="flex gap-2 items-center">
                   <div className="flex-1 bg-gray-50 border border-gray-100 p-2 rounded-xl flex items-center justify-center text-xs font-bold text-gray-600">
-                    Plan Status: <span className="ml-1.5">{getDaysLeft(room.expiryDate, room.promoPlan)}</span>
+                    Plan Status: <span className="ml-1.5">{getPlanStatus(room)}</span>
                   </div>
                   <button onClick={() => handleDelete(room._id)} disabled={!!actionBusy} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform border border-red-100 disabled:opacity-60"><X size={14} strokeWidth={3}/> Delete Ad</button>
                 </div>
@@ -811,6 +827,24 @@ export default function AdminPanel() {
                 <h3 className="font-black text-gray-800 mb-1">Free Ads Auto-Approve</h3>
                 <p className="text-[11px] font-bold text-gray-500 mb-3">ON = free/regular ads seedha live (bina review). OFF = admin verification ke baad. Paid/promo HAMESHA review mangte hain.</p>
                 <button onClick={() => { const v = !sysAutoApprove; if (window.confirm(v ? "Free ads seedha LIVE honge. Continue?" : "Free ads phir se review me jayenge. Continue?")) { setSysAutoApprove(v); saveSystemSettings(sysCategories, sysFacilities, sysPricing, sysAdminPath, v); } }} className={`w-full py-3 rounded-xl font-black text-sm active:scale-95 transition-colors ${sysAutoApprove ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{sysAutoApprove ? (<span className="inline-flex items-center gap-1"><Check size={14} strokeWidth={3} /> ON — Free ads seedha live</span>) : 'OFF — Free ads review me'}</button>
+              </div>
+
+              {/* 🧾 Service Provider listing fee (per-day rate) */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-purple-200">
+                <h3 className="font-black text-gray-800 mb-1 flex items-center gap-1.5"><Briefcase size={16} className="text-purple-600" /> Service Provider Settings</h3>
+                <p className="text-[11px] font-bold text-gray-500 mb-3">Per-day listing rate. Provider apni listing ke waqt duration (din) chunta hai; total = rate × days. 0 = free listing.</p>
+                <div className="flex gap-2">
+                  <div className="flex-1 min-w-0 flex items-center gap-1 bg-gray-50 rounded-xl border px-3">
+                    <span className="font-black text-gray-400 text-sm">₹</span>
+                    <input type="number" min="0" max="100000" step="1" value={sysPricing.serviceDailyRate ?? '0'} onChange={(e) => setSysPricing({ ...sysPricing, serviceDailyRate: e.target.value })} placeholder="Per day rate" className="flex-1 min-w-0 p-3 bg-transparent outline-none font-bold text-sm" />
+                    <span className="text-[10px] font-bold text-gray-400">/day</span>
+                  </div>
+                  <button onClick={() => { const n = Number(sysPricing.serviceDailyRate); if (!Number.isInteger(n) || n < 0 || n > 100000) return alert('Rate 0 se 100000 ke beech poora number hona chahiye.'); const next = { ...sysPricing, serviceDailyRate: String(n) }; setSysPricing(next); saveSystemSettings(sysCategories, sysFacilities, next); }} className="bg-purple-600 text-white px-5 rounded-xl font-black text-sm active:scale-95">Save</button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-3">
+                  {[7, 15, 30].map(d => (<div key={d} className="bg-purple-50 border border-purple-100 rounded-lg p-2 text-center"><p className="text-[9px] font-black uppercase text-purple-500">{d} din</p><p className="text-sm font-black text-purple-800">₹{serviceDailyRate * d}</p></div>))}
+                </div>
+                <p className="text-[10px] font-bold text-gray-400 mt-2">Service provider payment listing submit karte waqt UPI se lega; admin approval ke baad duration start hogi.</p>
               </div>
 
               {/* 📞 Number reveal daily limit (per user) */}
