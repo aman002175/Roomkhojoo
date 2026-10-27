@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Info, FileText, Shield, Lock, ExternalLink, Heart } from 'lucide-react';
+import { openAnalyticsConsent } from './analytics';
 
 // =============================================
 // LANGUAGE SUPPORT (Hinglish / English / हिंदी)
@@ -310,11 +311,11 @@ const pages = {
           },
           {
             heading: '5. Aapki Jaankari Ka Use Kaise Hota Hai',
-            body: 'Sirf in kaamon ke liye:\n\n• Account chalana aur login dena\n• Aapke ads dikhana aur interested users tak pahunchana\n• Safety aur moderation — fake ads, spam aur fraud rokna\n• OTP aur zaroori service emails bhejna\n• Kanooni requirements poori karna\n\nHum aapka data kabhi bechte nahi, kisi third party ko advertisement ke liye nahi dete, aur aapki marzi ke bina kisi ke saath share nahi karte.',
+            body: 'Sirf in kaamon ke liye:\n\n• Account chalana aur login dena\n• Aapke ads dikhana aur interested users tak pahunchana\n• Safety aur moderation — fake ads, spam aur fraud rokna\n• OTP aur zaroori service emails bhejna\n• Aggregate analytics samajhna — sirf aapki analytics consent ke baad\n• Kanooni requirements poori karna\n\nHum aapka data kabhi bechte nahi, kisi third party ko advertisement ke liye nahi dete, aur aapki marzi ke bina kisi ke saath share nahi karte.',
           },
           {
             heading: '6. Kiske Saath Jaankari Share Hoti Hai',
-            body: 'Sirf zaroori service partners ke saath, aur sirf utne hi kaam ke liye:\n\n• Cloud hosting / database / image services (data safe rakhne ke liye)\n• Google Sign-In (sirf jab aap khud Google se login karein)\n• Court / police ke valid kanooni order par\n\nInke alawa kisi bhi haalat me aapki personal jaankari kisi ko nahi di jaati.',
+            body: 'Sirf zaroori service partners ke saath, aur sirf utne hi kaam ke liye:\n\n• Cloud hosting / database / image services (data safe rakhne ke liye)\n• Google Sign-In (sirf jab aap khud Google se login karein)\n• Google Analytics (sirf aapki analytics consent ke baad; aggregate usage, advertising nahi)\n• Court / police ke valid kanooni order par\n\nInke alawa kisi bhi haalat me aapki personal jaankari kisi ko nahi di jaati.',
           },
           {
             heading: '7. Apni Jaankari Par Aapke Adhikar',
@@ -330,7 +331,7 @@ const pages = {
           },
           {
             heading: '10. Cookies Aur Local Storage',
-            body: 'Ye app cookies ki jagah browser ka local storage use karti hai — sirf zaroori cheezon ke liye: login token, chuni hui language aur cached listings. Koi advertising tracker nahi hai. Browser data clear karne par aap logout ho jayenge aur preferences reset ho jayengi.',
+            body: 'Ye app login token, chuni hui language aur cached listings ke liye browser ka local storage use karti hai. Optional Google Analytics 4 sirf tab load hota hai jab aap analytics consent dete hain; tab Google `_ga` aur `_ga_<id>` cookies set karta hai taaki hum aggregate page usage samajh sakein. Reject karne par analytics script load nahi hota aur koi analytics cookie nahi banti. Ye advertising tracker nahi hai. Consent Privacy page ke “Analytics cookie settings” se kabhi bhi badal sakte hain. Browser data clear karne par aap logout ho jayenge aur preferences reset ho jayengi.',
           },
           {
             heading: '11. Consent Withdrawal, Breach Aur Nomination',
@@ -338,7 +339,7 @@ const pages = {
           },
           {
             heading: '12. International Processing Aur Grievance',
-            body: 'Aapka data cloud providers (hosting, database, image hosting) ke through process ho sakta hai jo India ke bahar servers use karte hain — contractual safeguards ke saath. Grievance Officer: 29 Dev\'s, 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Acknowledgment 24 ghante, resolution 15 din.',
+            body: 'Aapka data cloud providers (hosting, database, image hosting) aur consent-based Google Analytics ke through process ho sakta hai jo India ke bahar servers use karte hain — contractual safeguards ke saath. Grievance Officer: 29 Dev\'s, 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Acknowledgment 24 ghante, resolution 15 din.',
           },
         ],
       },
@@ -363,11 +364,11 @@ const pages = {
           },
           {
             heading: '5. How We Use Your Information',
-            body: 'Only for these purposes:\n\n• Running your account and providing login\n• Displaying your ads and reaching interested users\n• Safety and moderation — stopping fake ads, spam and fraud\n• Sending OTP and essential service emails\n• Meeting legal requirements\n\nWe never sell your data, never give it to any third party for advertising, and never share it without your consent.',
+            body: 'Only for these purposes:\n\n• Running your account and providing login\n• Displaying your ads and reaching interested users\n• Safety and moderation — stopping fake ads, spam and fraud\n• Sending OTP and essential service emails\n• Understanding aggregate usage — only after your analytics consent\n• Meeting legal requirements\n\nWe never sell your data, never give it to any third party for advertising, and never share it without your consent.',
           },
           {
             heading: '6. Who We Share Information With',
-            body: 'Only with essential service partners, and only for that specific purpose:\n\n• Cloud hosting / database / image services (to keep data safe)\n• Google Sign-In (only when you choose to log in with Google)\n• On a valid legal order from a court / police\n\nBeyond this, your personal information is never given to anyone under any circumstances.',
+            body: 'Only with essential service partners, and only for that specific purpose:\n\n• Cloud hosting / database / image services (to keep data safe)\n• Google Sign-In (only when you choose to log in with Google)\n• Google Analytics (only after your analytics consent; aggregate usage, not advertising)\n• On a valid legal order from a court / police\n\nBeyond this, your personal information is never given to anyone under any circumstances.',
           },
           {
             heading: '7. Your Rights Over Your Information',
@@ -383,7 +384,7 @@ const pages = {
           },
           {
             heading: '10. Cookies & Local Storage',
-            body: 'This app uses browser local storage instead of cookies — only for essentials: login token, selected language and cached listings. There are no advertising trackers. Clearing browser data will log you out and reset preferences.',
+            body: 'This app uses browser local storage for login token, selected language and cached listings. Optional Google Analytics 4 loads only when you give analytics consent; Google then sets `_ga` and `_ga_<id>` cookies so we can understand aggregate page usage. If you reject, the analytics script does not load and no analytics cookie is set. This is not an advertising tracker. You can change consent anytime from “Analytics cookie settings” on the Privacy page. Clearing browser data will log you out and reset preferences.',
           },
           {
             heading: '11. Consent Withdrawal, Breach & Nomination',
@@ -391,7 +392,7 @@ const pages = {
           },
           {
             heading: '12. International Processing & Grievance',
-            body: 'Your data may be processed by cloud providers (hosting, database, image hosting) that use servers outside India, under contractual safeguards. Grievance Officer: 29 Dev\'s, 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Acknowledgment within 24 hours, resolution within 15 days.',
+            body: 'Your data may be processed by cloud providers (hosting, database, image hosting) and consent-based Google Analytics that use servers outside India, under contractual safeguards. Grievance Officer: 29 Dev\'s, 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, District Ganganagar, PO 12 NRD, Rajasthan 335039. Acknowledgment within 24 hours, resolution within 15 days.',
           },
         ],
       },
@@ -416,11 +417,11 @@ const pages = {
           },
           {
             heading: '5. आपकी जानकारी का उपयोग कैसे होता है',
-            body: 'सिर्फ़ इन कामों के लिए:\n\n• अकाउंट चलाना और लॉगिन देना\n• आपके विज्ञापन दिखाना और इच्छुक यूज़र्स तक पहुँचाना\n• सुरक्षा और मॉडरेशन — फ़र्ज़ी विज्ञापन, स्पैम और ठगी रोकना\n• OTP और ज़रूरी सर्विस ईमेल भेजना\n• कानूनी आवश्यकताएँ पूरी करना\n\nहम आपका डेटा कभी नहीं बेचते, किसी तीसरे पक्ष को विज्ञापन के लिए नहीं देते, और आपकी मर्ज़ी के बिना किसी के साथ साझा नहीं करते।',
+            body: 'सिर्फ़ इन कामों के लिए:\n\n• अकाउंट चलाना और लॉगिन देना\n• आपके विज्ञापन दिखाना और इच्छुक यूज़र्स तक पहुँचाना\n• सुरक्षा और मॉडरेशन — फ़र्ज़ी विज्ञापन, स्पैम और ठगी रोकना\n• OTP और ज़रूरी सर्विस ईमेल भेजना\n• समग्र उपयोग समझना — केवल आपकी analytics सहमति के बाद\n• कानूनी आवश्यकताएँ पूरी करना\n\nहम आपका डेटा कभी नहीं बेचते, किसी तीसरे पक्ष को विज्ञापन के लिए नहीं देते, और आपकी मर्ज़ी के बिना किसी के साथ साझा नहीं करते।',
           },
           {
             heading: '6. जानकारी किसके साथ साझा होती है',
-            body: 'सिर्फ़ ज़रूरी सर्विस पार्टनर्स के साथ, और सिर्फ़ उतने ही काम के लिए:\n\n• क्लाउड होस्टिंग / डेटाबेस / इमेज सेवाएँ (डेटा सुरक्षित रखने के लिए)\n• Google Sign-In (सिर्फ़ तब जब आप खुद Google से लॉगिन करें)\n• अदालत / पुलिस के वैध कानूनी आदेश पर\n\nइसके अलावा किसी भी हालत में आपकी व्यक्तिगत जानकारी किसी को नहीं दी जाती।',
+            body: 'सिर्फ़ ज़रूरी सर्विस पार्टनर्स के साथ, और सिर्फ़ उतने ही काम के लिए:\n\n• क्लाउड होस्टिंग / डेटाबेस / इमेज सेवाएँ (डेटा सुरक्षित रखने के लिए)\n• Google Sign-In (सिर्फ़ तब जब आप खुद Google से लॉगिन करें)\n• Google Analytics (केवल आपकी analytics सहमति के बाद; समग्र उपयोग, विज्ञापन नहीं)\n• अदालत / पुलिस के वैध कानूनी आदेश पर\n\nइसके अलावा किसी भी हालत में आपकी व्यक्तिगत जानकारी किसी को नहीं दी जाती।',
           },
           {
             heading: '7. अपनी जानकारी पर आपके अधिकार',
@@ -436,7 +437,7 @@ const pages = {
           },
           {
             heading: '10. कुकीज़ और लोकल स्टोरेज',
-            body: 'यह ऐप कुकीज़ की जगह ब्राउज़र का लोकल स्टोरेज उपयोग करता है — केवल ज़रूरी चीज़ों के लिए: लॉगिन टोकन, चुनी हुई भाषा और कैश्ड लिस्टिंग। कोई विज्ञापन ट्रैकर नहीं है। ब्राउज़र डेटा साफ़ करने पर आप लॉगआउट हो जाएँगे और प्राथमिकताएँ रीसेट हो जाएँगी।',
+            body: 'यह ऐप लॉगिन टोकन, चुनी हुई भाषा और कैश्ड लिस्टिंग के लिए ब्राउज़र का लोकल स्टोरेज उपयोग करता है। Optional Google Analytics 4 केवल तब लोड होता है जब आप analytics सहमति देते हैं; तब Google `_ga` और `_ga_<id>` कुकीज़ सेट करता है ताकि हम समग्र पेज उपयोग समझ सकें। Reject करने पर analytics स्क्रिप्ट लोड नहीं होती और कोई analytics कुकी नहीं बनती। यह विज्ञापन ट्रैकर नहीं है। सहमति Privacy पेज के “Analytics cookie settings” से कभी भी बदल सकते हैं। ब्राउज़र डेटा साफ़ करने पर आप लॉगआउट हो जाएँगे और प्राथमिकताएँ रीसेट हो जाएँगी।',
           },
           {
             heading: '11. सहमति वापसी, ब्रीच और नामांकन',
@@ -444,7 +445,7 @@ const pages = {
           },
           {
             heading: '12. अंतर्राष्ट्रीय प्रोसेसिंग और ग्रीवांस',
-            body: 'आपका डेटा क्लाउड प्रोवाइडर्स (होस्टिंग, डेटाबेस, इमेज होस्टिंग) के माध्यम से भारत के बाहर के सर्वर पर प्रोसेस हो सकता है — कॉन्ट्रैक्टुअल सुरक्षा उपायों के साथ। ग्रीवांस अधिकारी: 29 Dev\'s, 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, ज़िला गंगानगर, PO 12 NRD, राजस्थान 335039। पुष्टि 24 घंटे में, समाधान 15 दिनों में।',
+            body: 'आपका डेटा क्लाउड प्रोवाइडर्स (होस्टिंग, डेटाबेस, इमेज होस्टिंग) और consent-based Google Analytics के माध्यम से भारत के बाहर के सर्वर पर प्रोसेस हो सकता है — कॉन्ट्रैक्टुअल सुरक्षा उपायों के साथ। ग्रीवांस अधिकारी: 29 Dev\'s, 29devs@proton.me, +91 91458 91108, 6 BPM, Dabla, Block Raisinghangar, ज़िला गंगानगर, PO 12 NRD, राजस्थान 335039। पुष्टि 24 घंटे में, समाधान 15 दिनों में।',
           },
         ],
       },
@@ -663,6 +664,17 @@ export default function LegalPage({ type }) {
                 </p>
               </section>
             ))}
+            {type === 'privacy' && (
+              <div className="flex justify-center pt-1">
+                <button
+                  type="button"
+                  onClick={openAnalyticsConsent}
+                  className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-black text-gray-600 shadow-sm active:scale-95"
+                >
+                  Analytics cookie settings
+                </button>
+              </div>
+            )}
           </div>
         </main>
 

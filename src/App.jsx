@@ -1,9 +1,11 @@
-import { Component, Suspense, lazy, useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { Component, Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AlertTriangle } from 'lucide-react';
 import PromoPopup from './PromoPopup';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
+import CookieConsent from './CookieConsent';
+import { ANALYTICS_CONSENT_CHANGED_EVENT, trackPageView } from './analytics';
 
 // M6 fix: route-wise code splitting — pehla load chhota, baaki pages demand par
 // Hotfix: flaky mobile net par chunk fail ho toh 2 retry (fir ErrorBoundary + auto-reload)
@@ -28,6 +30,42 @@ const DEFAULT_ADMIN_PATH = '/admin-secret-29';
 const normalizePath = (raw, fallback) => {
   const p = String(raw || fallback || DEFAULT_ADMIN_PATH).trim();
   return p.startsWith('/') ? p : `/${p}`;
+};
+
+const isAdminPath = (path, adminPath) => path === adminPath || path.startsWith(`${adminPath}/`);
+
+const AnalyticsPageTracker = ({ adminPath, adminPathReady }) => {
+  const location = useLocation();
+  const lastTrackedPath = useRef(null);
+
+  useEffect(() => {
+    if (!adminPathReady) return;
+    const path = `${location.pathname}${location.search}`;
+    if (isAdminPath(path, adminPath)) {
+      lastTrackedPath.current = path;
+      return;
+    }
+    if (lastTrackedPath.current === path) return;
+    lastTrackedPath.current = path;
+    trackPageView(path);
+  }, [adminPath, adminPathReady, location.pathname, location.search]);
+
+  useEffect(() => {
+    const onConsentChange = () => {
+      if (!adminPathReady) return;
+      const path = `${location.pathname}${location.search}`;
+      if (isAdminPath(path, adminPath)) {
+        lastTrackedPath.current = path;
+        return;
+      }
+      lastTrackedPath.current = null;
+      trackPageView(path);
+    };
+    window.addEventListener(ANALYTICS_CONSENT_CHANGED_EVENT, onConsentChange);
+    return () => window.removeEventListener(ANALYTICS_CONSENT_CHANGED_EVENT, onConsentChange);
+  }, [adminPath, adminPathReady, location.pathname, location.search]);
+
+  return null;
 };
 
 const PageLoader = () => (
@@ -133,6 +171,7 @@ export default function App() {
   // 🔒 Admin path BACKEND se aata hai (DB settings) — env sirf fallback.
   // Backend na mile toh VITE_ADMIN_PATH, warna default. (No extra fetch lib.)
   const [adminPath, setAdminPath] = useState(() => normalizePath(import.meta.env.VITE_ADMIN_PATH));
+  const [adminPathReady, setAdminPathReady] = useState(false);
 
   useEffect(() => {
     apiFetch(`${API_BASE}/api/admin/settings`)
@@ -142,7 +181,8 @@ export default function App() {
           setAdminPath(normalizePath(data.settings.adminPath));
         }
       })
-      .catch(() => { /* backend na mile toh env/default path chalta rahega */ });
+      .catch(() => { /* backend na mile toh env/default path chalta rahega */ })
+      .finally(() => setAdminPathReady(true));
   }, []);
 
   if (!googleClientId) {
@@ -151,6 +191,7 @@ export default function App() {
 
   const appTree = (
     <Router>
+      <AnalyticsPageTracker adminPath={adminPath} adminPathReady={adminPathReady} />
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/" element={<MainApp />} />
@@ -171,6 +212,7 @@ export default function App() {
       </Suspense>
       {/* P2 #62: Popup ab Router ke andar — route-exclude (dashboard/admin/support) ke liye */}
       <Silence><PromoPopup adminPath={adminPath} /></Silence>
+      <CookieConsent />
     </Router>
   );
 
