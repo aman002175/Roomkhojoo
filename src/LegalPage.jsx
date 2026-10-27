@@ -331,7 +331,7 @@ const pages = {
           },
           {
             heading: '10. Cookies Aur Local Storage',
-            body: 'Ye app login token, chuni hui language aur cached listings ke liye browser ka local storage use karti hai. Optional Google Analytics 4 sirf tab load hota hai jab aap analytics consent dete hain; tab Google `_ga` aur `_ga_<id>` cookies set karta hai taaki hum aggregate page usage samajh sakein. Reject karne par analytics script load nahi hota aur koi analytics cookie nahi banti. Ye advertising tracker nahi hai. Consent Privacy page ke “Analytics cookie settings” se kabhi bhi badal sakte hain. Browser data clear karne par aap logout ho jayenge aur preferences reset ho jayengi.',
+            body: 'Ye app login token, chuni hui language aur cached listings ke liye browser ka local storage use karti hai. Google tag script har page load par load hota hai (tag detection aur consent management ke liye), lekin aapki analytics consent tak Google analytics storage denied rehti hai — koi `_ga` cookie nahi banti aur hum koi pageview/event nahi bhejte. Accept karne par Google `_ga` aur `_ga_<id>` cookies set karta hai aur aggregate page usage enable hota hai. Reject par analytics storage denied rehti hai; Google ko cookieless consent signals ja sakte hain. Ye advertising tracker nahi hai. Consent Privacy page ke “Analytics cookie settings” se kabhi bhi badal sakte hain. Browser data clear karne par aap logout ho jayenge aur preferences reset ho jayengi.',
           },
           {
             heading: '11. Consent Withdrawal, Breach Aur Nomination',
@@ -384,7 +384,7 @@ const pages = {
           },
           {
             heading: '10. Cookies & Local Storage',
-            body: 'This app uses browser local storage for login token, selected language and cached listings. Optional Google Analytics 4 loads only when you give analytics consent; Google then sets `_ga` and `_ga_<id>` cookies so we can understand aggregate page usage. If you reject, the analytics script does not load and no analytics cookie is set. This is not an advertising tracker. You can change consent anytime from “Analytics cookie settings” on the Privacy page. Clearing browser data will log you out and reset preferences.',
+            body: 'This app uses browser local storage for login token, selected language and cached listings. The Google tag script loads on every page (for tag detection and consent management), but Google analytics storage remains denied until you consent — no `_ga` cookie is set and we send no pageview/event. If you accept, Google sets `_ga` and `_ga_<id>` cookies and aggregate page usage is enabled. If you reject, analytics storage stays denied; Google may receive cookieless consent signals. This is not an advertising tracker. You can change consent anytime from “Analytics cookie settings” on the Privacy page. Clearing browser data will log you out and reset preferences.',
           },
           {
             heading: '11. Consent Withdrawal, Breach & Nomination',
@@ -437,7 +437,7 @@ const pages = {
           },
           {
             heading: '10. कुकीज़ और लोकल स्टोरेज',
-            body: 'यह ऐप लॉगिन टोकन, चुनी हुई भाषा और कैश्ड लिस्टिंग के लिए ब्राउज़र का लोकल स्टोरेज उपयोग करता है। Optional Google Analytics 4 केवल तब लोड होता है जब आप analytics सहमति देते हैं; तब Google `_ga` और `_ga_<id>` कुकीज़ सेट करता है ताकि हम समग्र पेज उपयोग समझ सकें। Reject करने पर analytics स्क्रिप्ट लोड नहीं होती और कोई analytics कुकी नहीं बनती। यह विज्ञापन ट्रैकर नहीं है। सहमति Privacy पेज के “Analytics cookie settings” से कभी भी बदल सकते हैं। ब्राउज़र डेटा साफ़ करने पर आप लॉगआउट हो जाएँगे और प्राथमिकताएँ रीसेट हो जाएँगी।',
+            body: 'यह ऐप लॉगिन टोकन, चुनी हुई भाषा और कैश्ड लिस्टिंग के लिए ब्राउज़र का लोकल स्टोरेज उपयोग करता है। Google tag स्क्रिप्ट हर पेज लोड पर लोड होती है (tag detection और consent management के लिए), लेकिन आपकी analytics सहमति तक Google analytics storage denied रहती है — कोई `_ga` कुकी नहीं बनती और हम कोई pageview/event नहीं भेजते। Accept करने पर Google `_ga` और `_ga_<id>` कुकीज़ सेट करता है और समग्र पेज उपयोग enable होता है। Reject पर analytics storage denied रहती है; Google को cookieless consent signals जा सकते हैं। यह विज्ञापन ट्रैकर नहीं है। सहमति Privacy पेज के “Analytics cookie settings” से कभी भी बदल सकते हैं। ब्राउज़र डेटा साफ़ करने पर आप लॉगआउट हो जाएँगे और प्राथमिकताएँ रीसेट हो जाएँगी।',
           },
           {
             heading: '11. सहमति वापसी, ब्रीच और नामांकन',

@@ -1,4 +1,4 @@
-const GA_ID = (import.meta.env.VITE_GA_MEASUREMENT_ID || '').trim() || 'G-KDSSBSYYQC';
+const GA_ID = 'G-KDSSBSYYQC';
 const CONSENT_KEY = 'roomkhojo_analytics_consent';
 export const ANALYTICS_CONSENT_EVENT = 'roomkhojo:analytics-consent';
 export const ANALYTICS_CONSENT_CHANGED_EVENT = 'roomkhojo:analytics-consent-changed';
@@ -50,24 +50,28 @@ const sendPageView = (path) => {
 };
 
 export const loadAnalytics = () => {
-  if (!GA_ID || disabled || loaded || getAnalyticsConsent() !== 'granted') return;
+  if (!GA_ID || loaded) return;
 
   loaded = true;
   ensureGtag();
-  const script = document.createElement('script');
-  script.async = true;
-  script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(GA_ID)}`;
-  script.onerror = () => {
-    loaded = false;
-  };
-  document.head.appendChild(script);
+  if (!document.querySelector('script[data-roomkhojo-ga]')) {
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(GA_ID)}`;
+    script.dataset.roomkhojoGa = 'true';
+    script.onerror = () => {
+      loaded = false;
+    };
+    document.head.appendChild(script);
+  }
 
   window.gtag('js', new Date());
   window.gtag('consent', 'default', {
-    analytics_storage: 'granted',
+    analytics_storage: getAnalyticsConsent() === 'granted' ? 'granted' : 'denied',
     ad_storage: 'denied',
     ad_user_data: 'denied',
-    ad_personalization: 'denied'
+    ad_personalization: 'denied',
+    wait_for_update: 500
   });
   window.gtag('config', GA_ID, {
     send_page_view: false,
@@ -78,7 +82,7 @@ export const loadAnalytics = () => {
 };
 
 export const initAnalytics = () => {
-  if (getAnalyticsConsent() === 'granted') loadAnalytics();
+  loadAnalytics();
 };
 
 export const trackPageView = (path) => {
@@ -93,6 +97,14 @@ export const setAnalyticsConsent = (granted) => {
   storage.set(next);
   if (granted) {
     disabled = false;
+    if (typeof window.gtag === 'function') {
+      window.gtag('consent', 'update', {
+        analytics_storage: 'granted',
+        ad_storage: 'denied',
+        ad_user_data: 'denied',
+        ad_personalization: 'denied'
+      });
+    }
     loadAnalytics();
   } else {
     disabled = true;

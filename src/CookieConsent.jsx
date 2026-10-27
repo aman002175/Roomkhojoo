@@ -26,7 +26,7 @@ export default function CookieConsent() {
       <div className="mx-auto max-w-3xl rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-2xl">
         <p className="text-sm font-black text-gray-800">Analytics cookies?</p>
         <p className="mt-1 text-xs font-semibold leading-relaxed text-gray-500">
-          Hum optional Google Analytics use karna chahte hain taaki pata chale kaunse pages useful hain. Accept karne par Google ki <span className="font-black">_ga</span> cookies set hongi; Reject par kuch track nahi hoga.{' '}
+          Hum optional Google Analytics use karte hain. Accept karne par Google ki <span className="font-black">_ga</span> cookies aur page analytics enable hongi. Reject par analytics storage off rahegi — koi analytics cookie ya pageview nahi; Google tag ke cookieless consent signals ja sakte hain.{' '}
           <a href="/privacy" className="font-black text-brand underline underline-offset-2">Privacy Policy</a>
         </p>
         <div className="mt-3 flex items-center justify-end gap-2">
