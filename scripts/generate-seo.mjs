@@ -108,7 +108,7 @@ const fetchRooms = async () => {
 };
 
 const writePage = async (route, html) => {
-  const target = path.resolve(distDir, `${route.replace(/^\//, '')}.html`);
+  const target = path.resolve(distDir, route.replace(/^\//, ''), 'index.html');
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, html, 'utf8');
 };
