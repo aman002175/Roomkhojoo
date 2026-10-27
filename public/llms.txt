@@ -1,0 +1,21 @@
+# RoomKhojo
+
+> RoomKhojo is a room, PG, flat, and hostel discovery platform focused on Hanumangarh, Rajasthan. Browse verified listings with photos, rent, facilities, map location, and owner contact details.
+
+## Main pages
+
+- [Home](https://roomkhojoo.vercel.app/): Search rooms, PG, flats, and hostels in Hanumangarh.
+- [About](https://roomkhojoo.vercel.app/about): What RoomKhojo offers and who it serves.
+- [Terms & Conditions](https://roomkhojoo.vercel.app/terms): Platform usage terms.
+- [Privacy Policy](https://roomkhojoo.vercel.app/privacy): How user and listing data is handled.
+- [Refund Policy](https://roomkhojoo.vercel.app/refund): Paid listing and promotion refund rules.
+
+## Listings
+
+Each public listing has a canonical URL in the form `https://roomkhojoo.vercel.app/rooms/<listing-id>`. Listings include rent, category, room type, facilities, photos, map coordinates, and a contact action.
+
+## Notes
+
+- Listings are added by owners and are subject to approval before appearing publicly.
+- RoomKhojo currently focuses on Hanumangarh, Rajasthan.
+- Contact and listing details must be verified directly with the advertiser before payment or move-in.

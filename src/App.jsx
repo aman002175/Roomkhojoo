@@ -1,11 +1,12 @@
 import { Component, Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, useParams } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AlertTriangle } from 'lucide-react';
 import PromoPopup from './PromoPopup';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
 import CookieConsent from './CookieConsent';
 import { ANALYTICS_CONSENT_CHANGED_EVENT, trackPageView } from './analytics';
+import { applyRouteSeo } from './seo';
 
 // M6 fix: route-wise code splitting — pehla load chhota, baaki pages demand par
 // Hotfix: flaky mobile net par chunk fail ho toh 2 retry (fir ErrorBoundary + auto-reload)
@@ -68,6 +69,16 @@ const AnalyticsPageTracker = ({ adminPath, adminPathReady }) => {
   return null;
 };
 
+const SeoManager = ({ adminPath }) => {
+  const location = useLocation();
+
+  useEffect(() => {
+    applyRouteSeo(location.pathname, { adminPath, preserveRoom: true });
+  }, [adminPath, location.pathname]);
+
+  return null;
+};
+
 const PageLoader = () => (
   <div className="h-[100dvh] w-full flex flex-col items-center justify-center bg-white gap-3">
     <p className="text-4xl font-black text-gray-800 tracking-tighter">Room<span className="text-brand">Khojo</span></p>
@@ -84,11 +95,16 @@ const PageLoader = () => (
 const NotFound = () => (
   <div className="h-[100dvh] w-full flex flex-col items-center justify-center bg-gray-50 gap-3 p-6 font-sans">
     <p className="text-6xl font-black text-gray-300">404</p>
-    <p className="text-lg font-black text-gray-700">Ye page nahi mila</p>
+    <h1 className="text-lg font-black text-gray-700">Ye page nahi mila</h1>
     <p className="text-xs font-bold text-gray-400 text-center">Link galat ho sakta hai ya page hata diya gaya hai.</p>
     <Link to="/" className="mt-4 bg-brand text-white px-6 py-3 rounded-2xl font-black text-sm active:scale-95">← Home par wapas jao</Link>
   </div>
 );
+
+const RoomRoute = () => {
+  const { roomId } = useParams();
+  return /^[a-f0-9]{24}$/i.test(String(roomId || '')) ? <MainApp /> : <NotFound />;
+};
 
 // Hotfix: chunk/network load failure detect (SW ya flaky net se MIME/import error)
 const isChunkLoadError = (err) => /dynamically imported module|Importing a module script failed|MIME type|error loading dynamically/i.test(String((err && err.message) || err || ''));
@@ -192,9 +208,11 @@ export default function App() {
   const appTree = (
     <Router>
       <AnalyticsPageTracker adminPath={adminPath} adminPathReady={adminPathReady} />
+      <SeoManager adminPath={adminPath} />
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/" element={<MainApp />} />
+          <Route path="/rooms/:roomId" element={<RoomRoute />} />
           <Route path={adminPath} element={<AdminPanel />} />
           <Route path="/dashboard" element={<UserDashboard />} />
           <Route path="/support" element={<Support />} />

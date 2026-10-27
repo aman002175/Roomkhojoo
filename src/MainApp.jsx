@@ -8,6 +8,7 @@ import { markerIcon, ICON_STAR } from './markerIcons';
 import AuthModal from './AuthModal';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (sab calls)
 import { safeImageUrl, safeMapUrl, directionsUrl, telUrl, whatsappUrl, upiUrl, phoneDigits } from './safeUrl';
+import { applyRoomSeo, applyRouteSeo } from './seo';
 
 // Effective-featured: promo + expiry valid ho tabhi orange STAR,
 // expire ho chuka toh NORMAL green (ad gayab nahi hota).
@@ -98,6 +99,13 @@ const readSavedMapCenter = () => {
   } catch { /* default center */ }
   return DEFAULT_MAP_CENTER;
 };
+
+const roomIdFromPath = (pathname = window.location.pathname) => {
+  const match = String(pathname || '').match(/^\/rooms\/([a-f0-9]{24})\/?$/i);
+  return match ? match[1] : null;
+};
+
+const roomIdFromLocation = () => new URLSearchParams(window.location.search).get('room') || roomIdFromPath();
 
   // 💰 "₹5,500" → 5500 (filter/sort ke liye)
   const priceNum = (p) => Number(String(p || '').replace(/\D/g, '')) || 0;
@@ -373,7 +381,8 @@ export default function MainApp() {
     const params = new URLSearchParams(window.location.search);
     params.delete('room');
     const qs = params.toString();
-    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+    const path = roomIdFromPath() ? '/' : window.location.pathname;
+    window.history.replaceState(null, '', `${path}${qs ? `?${qs}` : ''}`);
   };
 
   useEffect(() => {
@@ -386,17 +395,23 @@ export default function MainApp() {
           // P1 #34: agle offline ke liye cache (1.5MB se bada ho toh skip)
           try { const json = JSON.stringify(data.rooms || []); if (json.length < 1500000) localStorage.setItem('roomkhojo_rooms_cache', json); } catch { /* cache optional */ }
           // 🔗 P2 #38/#39: shared link → popup + map fly; ad na mile toh saaf message (silent nahi)
-          const rid = new URLSearchParams(window.location.search).get('room');
+          const rid = roomIdFromLocation();
           if (rid) {
             const found = (data.rooms || []).find(r => r._id === rid);
             if (found) {
               setSelectedRoom(found);
-              // reload ke waqt duplicate history entry na bane
-              if (!(window.history.state && window.history.state.roomPopup)) window.history.pushState({ roomPopup: true }, '', window.location.href);
+              // purane ?room= link ko clean canonical URL par upgrade karo, bina extra history entry ke
+              if (!roomIdFromPath()) {
+                const p = new URLSearchParams(window.location.search);
+                p.delete('room');
+                const qs = p.toString();
+                window.history.replaceState(null, '', `/rooms/${found._id}${qs ? `?${qs}` : ''}`);
+              }
               flyWhenReady(found.lng, found.lat, 16);
             } else {
               alert('Ye ad ab available nahi hai — delete ho gayi ya expire ho chuki hai.');
               cleanRoomParam();
+              applyRouteSeo('/');
             }
           }
         } else setRoomsError(true);
@@ -437,7 +452,7 @@ export default function MainApp() {
     return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
   }, []);
 
-  // P2 #40: filter badle → URL me likho (replaceState; ?room= wala param safe rehta hai)
+  // P2 #40: filter badle → URL me likho (replaceState; room path safe rehta hai)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     ['cat', 'type', 'q', 'min', 'max', 'sort', 'near'].forEach(k => params.delete(k));
@@ -449,7 +464,7 @@ export default function MainApp() {
     if (sortBy !== 'new') params.set('sort', sortBy);
     if (nearRadius !== 0) params.set('near', String(nearRadius));
     const qs = params.toString();
-    window.history.replaceState(window.history.state, '', qs ? `?${qs}` : window.location.pathname);
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
   }, [activeCategory, activeAudience, searchQuery, minPrice, maxPrice, sortBy, nearRadius]);
 
   // Login/signup success par session save (token + user)
@@ -772,7 +787,7 @@ export default function MainApp() {
   // 📍 First-open auto location: saved location turant center, phir GPS se fresh city/area.
   // Shared room link par nahi — us ad par fly hona chahiye.
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('room')) return;
+    if (roomIdFromLocation()) return;
     if (!navigator.geolocation) return;
     let cancelled = false;
     const locate = async () => {
@@ -811,6 +826,14 @@ export default function MainApp() {
     }
   }, []);
 
+  useEffect(() => {
+    if (roomIdFromPath()) applyRouteSeo(window.location.pathname);
+  }, []);
+
+  useEffect(() => {
+    if (selectedRoom) applyRoomSeo(selectedRoom);
+  }, [selectedRoom]);
+
   // 👁 P2 #46: view-count sirf 3s dwell ke baad (turant open-close se count na badhe)
   useEffect(() => {
     if (!selectedRoom || !selectedRoom._id) return;
@@ -825,12 +848,19 @@ export default function MainApp() {
         // apna hi history.back() tha (close button) → URL bhi saaf
         suppressPopstateRef.current = false;
         setSelectedRoom(null);
-        if (new URLSearchParams(window.location.search).get('room')) cleanRoomParam();
+        cleanRoomParam();
+        applyRouteSeo(window.location.pathname);
         return;
       }
-      const rid = new URLSearchParams(window.location.search).get('room');
-      if (rid) setSelectedRoom(rooms.find(r => r._id === rid) || null);
-      else setSelectedRoom(null);
+      const rid = roomIdFromLocation();
+      if (rid) {
+        const found = rooms.find(r => r._id === rid) || null;
+        setSelectedRoom(found);
+        if (!found) applyRouteSeo(window.location.pathname);
+      } else {
+        setSelectedRoom(null);
+        applyRouteSeo(window.location.pathname);
+      }
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -990,13 +1020,14 @@ export default function MainApp() {
     });
   };
 
-  // Popup khulne par link me ?room=id lagao (share/copy ke liye) + back-button history entry (P2 #39)
+  // Popup khulne par clean room URL lagao (share/copy ke liye) + back-button history entry (P2 #39)
   const openRoomPopup = (room) => {
     setSelectedRoom(room);
     if (room && room._id) {
       const p = new URLSearchParams(window.location.search);
-      p.set('room', room._id);
-      const url = `?${p.toString()}`;
+      p.delete('room');
+      const qs = p.toString();
+      const url = `/rooms/${room._id}${qs ? `?${qs}` : ''}`;
       if (window.history.state && window.history.state.roomPopup) window.history.replaceState({ roomPopup: true }, '', url);
       else window.history.pushState({ roomPopup: true }, '', url);
     }
@@ -1009,6 +1040,15 @@ export default function MainApp() {
     setView('map');
     mapUserMovedRef.current = true;
     if (map.current) map.current.flyTo({ center: [b.lng, b.lat], zoom: 15.5 });
+  };
+
+  const handleRoomLink = (e, room) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    openRoomPopup(room);
+    setView('map');
+    mapUserMovedRef.current = true;
+    if (map.current) map.current.flyTo({ center: [room.lng, room.lat], zoom: 15.5 });
   };
 
   // ❤️ Favorites load (login par) + toggle
@@ -1035,7 +1075,7 @@ export default function MainApp() {
 
   // 🔗 Share helpers — FRONTEND deep-link (app seedha ad kholegi).
   // (Backend /r/:id ab sirf puraane links ka redirect-fallback hai.)
-  const shareUrl = (room) => `${window.location.origin}/?room=${room._id}`;
+  const shareUrl = (room) => `${window.location.origin}/rooms/${room._id}`;
   const shareText = (room) => `${room.title} — ${room.price} (${room.category} • ${room.type})\n${room.landmark || 'Hanumangarh'}\nDekho: ${shareUrl(room)}`;
 
   const shareWhatsApp = (room) => {
@@ -1212,8 +1252,9 @@ export default function MainApp() {
     if (window.history.state && window.history.state.roomPopup) {
       suppressPopstateRef.current = true;
       window.history.back();
-    } else if (new URLSearchParams(window.location.search).get('room')) {
+    } else if (roomIdFromLocation()) {
       cleanRoomParam();
+      applyRouteSeo(window.location.pathname);
     }
   };
 
@@ -1263,7 +1304,7 @@ export default function MainApp() {
       if (call) window.location.href = call;
       return;
     }
-    const text = `Namaste! Maine RoomKhojo par aapka room "${room.title}" dekha. Kya ye abhi available hai? \n\nRoom Link: ${window.location.href}`;
+    const text = `Namaste! Maine RoomKhojo par aapka room "${room.title}" dekha. Kya ye abhi available hai? \n\nRoom Link: ${shareUrl(room)}`;
     const wa = whatsappUrl(clean, text);
     if (wa) window.location.href = wa;
   };
@@ -1437,7 +1478,7 @@ export default function MainApp() {
             <div className="flex items-center gap-2">
               <button onClick={() => setIsMenuOpen(true)} className="p-1.5 -ml-1 text-gray-600 active:scale-95" aria-label="Open menu"><Menu size={24} /></button>
               <div className="flex flex-col">
-                <h1 className="text-xl font-black text-gray-800 tracking-tighter leading-tight">Room<span className="text-brand">Khojo</span></h1>
+                <h1 className="text-xl font-black text-gray-800 tracking-tighter leading-tight">Room<span className="text-brand">Khojo</span><span className="sr-only"> — Hanumangarh me PG, Flat, Hostel aur Room</span></h1>
                 <a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="text-[10px] font-bold text-gray-500 hover:opacity-80 transition-opacity leading-none mt-0.5 tracking-tight">Built with <Heart size={10} fill="currentColor" className="inline text-brand" /> by <span className="text-brand">29 Dev's</span></a>
               </div>
             </div>
@@ -1521,7 +1562,7 @@ export default function MainApp() {
           return (
             <div className="absolute top-2 left-2 right-2 z-30">
               <div onClick={openBannerRoom} data-room-idx={bannerIndex % bannerRooms.length} className="bg-white/95 backdrop-blur rounded-xl shadow-lg border border-purple-200 px-2 py-1.5 flex items-center gap-2 active:scale-[0.98] transition-transform cursor-pointer">
-                <img src={getImageUrl(b.image)} className="w-11 h-11 rounded-lg object-cover bg-gray-200 shrink-0" alt="Sponsored" />
+                <img src={getImageUrl(b.image)} className="w-11 h-11 rounded-lg object-cover bg-gray-200 shrink-0" alt={b.title || 'Sponsored room'} />
                 <div className="flex-1 min-w-0">
                   <p className={`text-[8px] font-black uppercase tracking-wider flex items-center gap-1 ${b.listingType === 'service' ? 'text-red-600' : 'text-purple-600'}`}>{b.listingType === 'service' ? <Megaphone size={10} /> : <Star size={10} fill="currentColor" />} {b.listingType === 'service' ? 'Advertisement' : 'Sponsored'}</p>
                   <p className="font-black text-gray-800 text-[13px] leading-tight truncate">{b.title}</p>
@@ -1558,9 +1599,9 @@ export default function MainApp() {
           <div className="grid gap-5 pb-32">
             {roomsError ? (<div className="text-center p-10"><AlertTriangle size={28} className="mx-auto text-amber-500 mb-2" /><p className="text-gray-600 font-bold text-sm mb-3">Ads load nahi ho paye. Internet check karein.</p><button onClick={() => setRoomsReloadKey(k => k + 1)} className="bg-brand text-white px-5 py-2.5 rounded-xl font-black text-sm active:scale-95">Retry</button></div>) : sortedRooms.length === 0 ? (<div className="text-center p-10 text-gray-500 font-bold">Koi listing nahi mili.</div>) : (sortedRooms.map(room => (
               <div key={room._id} className={`bg-white rounded-3xl overflow-hidden shadow-md border ${room.isPromoted ? 'border-orange-200' : 'border-gray-50'}`}>
-                <div className="relative"><img src={getImageUrl(room.image)} className="w-full h-48 object-cover bg-gray-200" alt="Room" />{isFeatured(room) && <div className="absolute top-3 left-3 bg-orange-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1"><Star size={10} fill="currentColor" /> Featured</div>}<div className="absolute top-3 right-3 bg-white/90 px-3 py-1 rounded-full text-brand font-black">{room.price}</div></div>
+                <a href={`/rooms/${room._id}`} onClick={(e) => handleRoomLink(e, room)} className="relative block" aria-label={`${room.title} — details dekho`}><img src={getImageUrl(room.image)} className="w-full h-48 object-cover bg-gray-200" alt={`${room.title} — ${room.category || 'Room'} in ${room.landmark || 'Hanumangarh'}`} loading="lazy" decoding="async" />{isFeatured(room) && <div className="absolute top-3 left-3 bg-orange-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1"><Star size={10} fill="currentColor" /> Featured</div>}<div className="absolute top-3 right-3 bg-white/90 px-3 py-1 rounded-full text-brand font-black">{room.price}</div></a>
                 <div className="p-4">
-                  <div className="flex justify-between items-start mb-1"><h3 className="font-bold text-gray-900 text-lg leading-tight">{room.title}</h3><span className={`px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-2 ${room.listingType === 'service' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-gray-100 text-gray-600'}`}>{room.listingType === 'service' ? 'Advertisement' : `${room.type} • ${room.category}`}</span></div>
+                  <div className="flex justify-between items-start mb-1"><h3 className="font-bold text-gray-900 text-lg leading-tight"><a href={`/rooms/${room._id}`} onClick={(e) => handleRoomLink(e, room)} className="hover:text-brand">{room.title}</a></h3><span className={`px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-2 ${room.listingType === 'service' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-gray-100 text-gray-600'}`}>{room.listingType === 'service' ? 'Advertisement' : `${room.type} • ${room.category}`}</span></div>
                   <p className="text-sm font-bold text-gray-500 flex items-center gap-1"><MapPin size={14} className="shrink-0" /> {room.landmark || 'Hanumangarh'}</p>
                   {Array.isArray(room.landmarks) && room.landmarks.length > 0 && (<div className="mt-1 space-y-0.5">{room.landmarks.slice(0, 3).map((l, i) => (<p key={i} className="text-[11px] font-bold text-purple-700 flex items-center gap-1"><PoiIcon cat={l.cat} size={12} /><span className="truncate">{l.name} ({fmtDist(l.distM)})</span></p>))}{room.landmarks.length > 3 && (<p className="text-[10px] font-bold text-purple-500">+{room.landmarks.length - 3} aur</p>)}</div>)}
                   <div className="flex gap-2 mt-3 items-center">
@@ -1576,7 +1617,7 @@ export default function MainApp() {
         {selectedRoom && view === 'map' && !isPickingLocation && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-h-[42dvh] overflow-y-auto bg-white rounded-2xl shadow-2xl z-[100] p-3 border border-gray-100">
               <button onClick={closeRoomPopup} className="absolute top-2 right-2 w-8 h-8 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-600 z-10"><X size={18}/></button>
-            <div className="flex gap-3 mb-2"><div className="flex gap-2 overflow-x-auto shrink-0 max-w-[45%] no-scrollbar">{roomGallery(selectedRoom).map((u, i) => (<img key={i} src={getImageUrl(u)} className="w-16 h-16 object-cover rounded-xl bg-gray-200 shrink-0 border border-gray-100" alt={`Room ${i + 1}`} />))}</div><div className="flex-1"><div className="flex justify-between items-start pr-10"><h3 className="font-black text-gray-800 line-clamp-1">{selectedRoom.title}</h3><span className={`px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-1 ${selectedRoom.listingType === 'service' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-brand/10 text-brand'}`}>{selectedRoom.listingType === 'service' ? 'Advertisement' : selectedRoom.category}</span></div><p className="text-brand font-black text-xl leading-none mt-1">{selectedRoom.price}</p><p className="text-[11px] font-bold text-gray-500 mt-1.5 flex items-center gap-1"><User size={12}/> {selectedRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {revealedContacts[selectedRoom._id] ? `+91 ${revealedContacts[selectedRoom._id]}` : '••••• •••••'}</p></div></div>
+            <div className="flex gap-3 mb-2"><div className="flex gap-2 overflow-x-auto shrink-0 max-w-[45%] no-scrollbar">{roomGallery(selectedRoom).map((u, i) => (<img key={i} src={getImageUrl(u)} className="w-16 h-16 object-cover rounded-xl bg-gray-200 shrink-0 border border-gray-100" alt={`${selectedRoom.title} — photo ${i + 1}`} loading="lazy" decoding="async" />))}</div><div className="flex-1"><div className="flex justify-between items-start pr-10"><h3 className="font-black text-gray-800 line-clamp-1">{selectedRoom.title}</h3><span className={`px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-1 ${selectedRoom.listingType === 'service' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-brand/10 text-brand'}`}>{selectedRoom.listingType === 'service' ? 'Advertisement' : selectedRoom.category}</span></div><p className="text-brand font-black text-xl leading-none mt-1">{selectedRoom.price}</p><p className="text-[11px] font-bold text-gray-500 mt-1.5 flex items-center gap-1"><User size={12}/> {selectedRoom.ownerName || 'Owner'} <span className="mx-1">•</span> <Phone size={12}/> {revealedContacts[selectedRoom._id] ? `+91 ${revealedContacts[selectedRoom._id]}` : '••••• •••••'}</p></div></div>
             {selectedRoom.description && (selectedRoom.listingType === 'service' ? (
               <p className="mb-2 border-t border-gray-50 pt-2 text-[11px] font-semibold leading-relaxed text-gray-600">{selectedRoom.description}</p>
             ) : (
