@@ -1,4 +1,4 @@
-const GA_ID = (import.meta.env.VITE_GA_MEASUREMENT_ID || '').trim() || 'G-3JD2HYP04F';
+const GA_ID = (import.meta.env.VITE_GA_MEASUREMENT_ID || '').trim() || 'G-KDSSBSYYQC';
 const CONSENT_KEY = 'roomkhojo_analytics_consent';
 export const ANALYTICS_CONSENT_EVENT = 'roomkhojo:analytics-consent';
 export const ANALYTICS_CONSENT_CHANGED_EVENT = 'roomkhojo:analytics-consent-changed';
