@@ -23,6 +23,7 @@ const UserDashboard = lazyRetry(() => import('./UserDashboard'));
 const LegalPage = lazyRetry(() => import('./LegalPage'));
 const Support = lazyRetry(() => import('./Support'));
 const ForgotPassword = lazyRetry(() => import('./ForgotPassword'));
+const VerifySignup = lazyRetry(() => import('./VerifySignup'));
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://roomkhojo-backend.vercel.app').replace(/\/api\/?$/, ''); // P2 #58: sirf trailing /api strip (beech ka '/api' nahi)
 const DEFAULT_ADMIN_PATH = '/admin-secret-29';
@@ -217,6 +218,7 @@ export default function App() {
           <Route path="/dashboard" element={<UserDashboard />} />
           <Route path="/support" element={<Support />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/verify-signup" element={<VerifySignup />} />
 
           {/* ── Legal Pages ── */}
           <Route path="/about" element={<LegalPage type="about" />} />

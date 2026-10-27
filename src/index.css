@@ -17,6 +17,14 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* RoomKhojo device-consistent UI scale: header/footer/text dono devices par
+   roughly same size dikhen — chhote screens par compact, bade par readable.
+   Map area ko screen ka bada section milta hai. */
+html {
+  font-size: clamp(13px, min(4.2vw, 2.15vh), 16px);
+}
+
+
 /* Terms checkbox hint: halka shake + blink (jab bina tick kiye aage badhne ki koshish ho) */
 @keyframes rk-shake {
   0%, 100% { transform: translateX(0); }

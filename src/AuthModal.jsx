@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
-import { AlertCircle, ArrowLeft, Camera, CheckCircle2, LifeBuoy, Loader2, Lock, Mail, Phone, ShieldCheck, User, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Camera, CheckCircle2, LifeBuoy, Loader2, Lock, Mail, Phone, User, X } from 'lucide-react';
 import { apiFetch } from './apiFetch';
 import AuthField, { PasswordToggle } from './AuthField';
 
@@ -50,10 +50,7 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
-  const [otp, setOtp] = useState('');
-  const [signupStep, setSignupStep] = useState('form'); // form | otp
-  const [info, setInfo] = useState('');
-  const [cooldown, setCooldown] = useState(0);
+  const [confirmPass, setConfirmPass] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [terms, setTerms] = useState(false);
   const [hint, setHint] = useState(false);
@@ -93,12 +90,6 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
   useEffect(() => () => {
     if (helpPhotoUrl) URL.revokeObjectURL(helpPhotoUrl);
   }, [helpPhotoUrl]);
-
-  useEffect(() => {
-    if (cooldown <= 0) return undefined;
-    const t = setInterval(() => setCooldown((c) => c - 1), 1000);
-    return () => clearInterval(t);
-  }, [cooldown]);
 
   useEffect(() => {
     prevFocusRef.current = document.activeElement;
@@ -144,7 +135,7 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
   };
 
   const openHelp = () => {
-    setHelpIssue(mode === 'signup' ? (signupStep === 'otp' ? 'otp' : 'signup') : 'login');
+    setHelpIssue(mode === 'signup' ? 'signup' : 'login');
     setHelpMessage(error ? `Error: ${error}\n` : '');
     setHelpEmail(email.trim());
     setHelpPhone(cleanPhone(phone));
@@ -242,9 +233,9 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
     if (!email.trim().includes('@')) return setError('Sahi email address dalein.');
     if (!pass) return setError('Password dalein.');
     if (mode === 'signup' && pass.length < 8) return setError('Password kam se kam 8 characters ka ho.');
+    if (mode === 'signup' && pass !== confirmPass) return setError('Dono passwords match nahi kar rahe. Dobara check karein.');
     setBusy('email');
     setError('');
-    setInfo('');
     try {
       const endpoint = mode === 'signup' ? 'signup/request-otp' : 'login';
       const body = mode === 'signup'
@@ -258,67 +249,20 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
       let data = {};
       try { data = await res.json(); } catch { data = {}; }
       if (data.success && mode === 'signup') {
-        setSignupStep('otp');
-        setOtp('');
-        setInfo(data.maskedEmail ? `6-digit OTP ${data.maskedEmail} par bheja gaya hai. Inbox/spam check karein.` : 'Email par 6-digit OTP bhej diya gaya hai. Inbox/spam check karein.');
-        setCooldown(60);
+        const pendingEmail = data.email || email.trim();
+        try {
+          sessionStorage.setItem('roomkhojo_signup_pending', JSON.stringify({
+            email: pendingEmail,
+            maskedEmail: data.maskedEmail || ''
+          }));
+        } catch { /* private mode: URL query still works */ }
+        onClose && onClose();
+        navigate(`/verify-signup?email=${encodeURIComponent(pendingEmail)}`);
       } else if (data.success) {
         onAuthed && onAuthed(data.token, data.user, mode);
         onClose && onClose();
       } else {
         setError(data.message || `Request fail hui (server ${res.status}). Dobara try karein.`);
-      }
-    } catch {
-      setError('Server se connection nahi bana. Internet check karke dobara try karein.');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const resendSignupOtp = async () => {
-    if (cooldown > 0) return;
-    setBusy('resend');
-    setError('');
-    setInfo('');
-    try {
-      const res = await apiFetch(`${BASE_URL}/api/users/signup/request-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(signupBody()),
-      });
-      let data = {};
-      try { data = await res.json(); } catch { data = {}; }
-      if (data.success) {
-        setInfo('Naya OTP bhej diya gaya hai.');
-        setCooldown(60);
-      } else {
-        setError(data.message || 'OTP dobara nahi bhej paye.');
-      }
-    } catch {
-      setError('Server se connection nahi bana. Dobara try karein.');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const verifySignupOtp = async (e) => {
-    e.preventDefault();
-    if (!/^\d{6}$/.test(otp.trim())) return setError('6-digit OTP dalein.');
-    setBusy('verify');
-    setError('');
-    try {
-      const res = await apiFetch(`${BASE_URL}/api/users/signup/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), otp: otp.trim(), password: pass }),
-      });
-      let data = {};
-      try { data = await res.json(); } catch { data = {}; }
-      if (data.success) {
-        onAuthed && onAuthed(data.token, data.user, 'signup');
-        onClose && onClose();
-      } else {
-        setError(data.message || 'OTP verify nahi hua. Dobara try karein.');
       }
     } catch {
       setError('Server se connection nahi bana. Internet check karke dobara try karein.');
@@ -396,7 +340,7 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
           <h2 className="mt-6 text-2xl font-extrabold tracking-tight text-gray-900">{helpOpen ? 'Account help' : copy.title}</h2>
           <p className="mt-1 text-sm font-semibold text-gray-500">{helpOpen ? 'Login/signup me dikkat? Admin ko error aur screenshot bhejein.' : copy.subtitle}</p>
 
-          {!helpOpen && !(mode === 'signup' && signupStep === 'otp') && (
+          {!helpOpen && (
           <div className="mt-5 grid grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1">
             {[
               { id: 'login', label: 'Sign in' },
@@ -550,47 +494,6 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
             )
           ) : (
           <>
-          {mode === 'signup' && signupStep === 'otp' ? (
-            <form onSubmit={verifySignupOtp} className="mt-5 space-y-3.5">
-              <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                <ShieldCheck size={20} className="mt-0.5 shrink-0 text-emerald-600" />
-                <div>
-                  <p className="text-xs font-extrabold text-emerald-800">Email verification zaroori hai</p>
-                  <p className="mt-0.5 text-[11px] font-semibold leading-relaxed text-emerald-700">
-                    {info || '6-digit OTP aapke email par bheja gaya hai. Inbox/spam check karein.'}
-                  </p>
-                </div>
-              </div>
-              <AuthField
-                label="Email OTP"
-                icon={ShieldCheck}
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={6}
-                placeholder="6-digit code"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                disabled={Boolean(busy)}
-              />
-              <button
-                type="submit"
-                disabled={Boolean(busy)}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand text-sm font-extrabold text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-              >
-                {busy === 'verify' && <Loader2 size={17} className="animate-spin" />}
-                {busy === 'verify' ? 'Verify ho raha hai…' : 'Verify & Create Account'}
-              </button>
-              <div className="flex items-center justify-between">
-                <button type="button" onClick={() => { setSignupStep('form'); setOtp(''); setError(''); setInfo(''); }} className="text-xs font-bold text-gray-500 hover:text-brand">
-                  Email/details badlein
-                </button>
-                <button type="button" onClick={resendSignupOtp} disabled={cooldown > 0 || Boolean(busy)} className="text-xs font-bold text-brand hover:underline disabled:text-gray-400 disabled:no-underline">
-                  {busy === 'resend' ? 'Bhej rahe hain…' : cooldown > 0 ? `Resend ${cooldown}s` : 'Resend OTP'}
-                </button>
-              </div>
-            </form>
-          ) : (
           <form onSubmit={submit} className="space-y-3.5">
             {mode === 'signup' && (
               <>
@@ -638,6 +541,19 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
               disabled={Boolean(busy)}
               right={<PasswordToggle show={showPass} onToggle={() => setShowPass((s) => !s)} />}
             />
+
+            {mode === 'signup' && (
+              <AuthField
+                label="Confirm password"
+                icon={Lock}
+                type={showPass ? 'text' : 'password'}
+                autoComplete="new-password"
+                placeholder="Dobara wahi password"
+                value={confirmPass}
+                onChange={(e) => setConfirmPass(e.target.value)}
+                disabled={Boolean(busy)}
+              />
+            )}
 
             {mode === 'signup' && pass.length > 0 && (
               <div className="px-1">
@@ -697,7 +613,6 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
               {busy === 'email' ? 'Please wait…' : mode === 'signup' ? 'Send Email OTP' : copy.cta}
             </button>
           </form>
-          )}
 
           <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50/60 p-3 text-center">
             <p className="text-[11px] font-semibold text-gray-500">Account nahi ban raha ya login nahi ho raha?</p>
@@ -710,7 +625,7 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
             </button>
           </div>
 
-          {GOOGLE_ENABLED && !(mode === 'signup' && signupStep === 'otp') && (
+          {GOOGLE_ENABLED && (
             <>
               <div className="my-4 flex items-center gap-3">
                 <div className="h-px flex-1 bg-gray-200" />
@@ -745,7 +660,6 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
             </>
           )}
 
-          {!(mode === 'signup' && signupStep === 'otp') && (
           <p className="mt-4 text-center text-[11px] font-semibold leading-relaxed text-gray-400">
             {mode === 'login' ? 'Naya account chahiye? ' : 'Pehle se account hai? '}
             <button
@@ -756,7 +670,6 @@ export default function AuthModal({ mode = 'login', onClose, onModeChange, onAut
               {mode === 'login' ? 'Sign up' : 'Sign in'}
             </button>
           </p>
-          )}
           </>
           )}
         </div>

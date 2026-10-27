@@ -206,6 +206,7 @@ export default function MainApp() {
   const submitAbortRef = useRef(null); // 🛑 P1 #35: cancel-able submit (AbortController)
   const submitCanceledRef = useRef(false); // user ne khud cancel kiya? (timeout se farq)
   const pendingActionRef = useRef(null); // P2 #36: guest ka adhoora kaam (login ke baad resume)
+  const openPostAdFormRef = useRef(null); // full-page OTP ke baad resume ke liye stable ref
   const suppressPopstateRef = useRef(false); // P2 #39: apna hi back() detect na ho
   const pendingFlyToRef = useRef(null); // P2 #38: map ready hone se pehle ka fly target
   const reportBusyRef = useRef(new Set()); // P2 #41: report double-tap guard (per-room)
@@ -476,6 +477,7 @@ export default function MainApp() {
     // P2 #36: guest ne Post Ad / Post Advertisement tap kiya tha → login ke baad wahi form khule
     const pending = pendingActionRef.current;
     pendingActionRef.current = null;
+    try { sessionStorage.removeItem('roomkhojo_pending_action'); } catch { /* private mode */ }
     if (pending === 'postAd') openPostAdForm('room');
     else if (pending === 'postServiceAd') openPostAdForm('service');
   };
@@ -1421,15 +1423,33 @@ export default function MainApp() {
     setIsPostAdOpen(true);
   };
 
+  useEffect(() => {
+    openPostAdFormRef.current = openPostAdForm;
+  });
+
   const handlePostAdClick = (kind = 'room') => {
     const nextKind = kind === 'service' ? 'service' : 'room';
     if (!isLoggedIn) {
-      pendingActionRef.current = nextKind === 'service' ? 'postServiceAd' : 'postAd';
+      const pending = nextKind === 'service' ? 'postServiceAd' : 'postAd';
+      pendingActionRef.current = pending;
+      try { sessionStorage.setItem('roomkhojo_pending_action', pending); } catch { /* private mode */ }
       setAuthMode('login');
       return;
     }
     openPostAdForm(nextKind);
   };
+
+  // Full-page signup OTP ke baad MainApp naya mount hota hai — guest ka
+  // "Post Ad" intent sessionStorage se resume karo.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    let pending = null;
+    try { pending = sessionStorage.getItem('roomkhojo_pending_action'); } catch { /* private mode */ }
+    if (!pending) return;
+    try { sessionStorage.removeItem('roomkhojo_pending_action'); } catch { /* private mode */ }
+    if (pending === 'postAd') openPostAdFormRef.current?.('room');
+    else if (pending === 'postServiceAd') openPostAdFormRef.current?.('service');
+  }, [isLoggedIn]);
 
   const startPickingLocation = () => {
     pickSnapshotRef.current = { lng: postLng, lat: postLat, accuracy: gpsAccuracy };
@@ -1545,8 +1565,14 @@ export default function MainApp() {
           </div>
         )}
         {view === 'map' && mapLoaded && roomsLoading && !mapDead && (
-          <div className="absolute left-1/2 top-3 z-30 -translate-x-1/2 pointer-events-none rounded-full bg-gray-900/85 px-3 py-1.5 text-[10px] font-black text-white shadow-lg flex items-center gap-1.5">
-            <Loader2 size={12} className="animate-spin" /> Listings load ho rahi hain…
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/70 backdrop-blur-sm">
+            <div className="rounded-2xl bg-white p-5 text-center shadow-lg">
+              <Loader2 className="mx-auto mb-2 animate-spin text-brand" size={22} />
+              <p className="text-sm font-black text-gray-900">
+                {rooms.length === 0 ? 'Rooms load ho rahe hain…' : 'Listings refresh ho rahi hain…'}
+              </p>
+              <p className="mt-1 text-[11px] font-bold text-gray-500">Map ready hai — thoda waqt lagta hai</p>
+            </div>
           </div>
         )}
         {mapDead && (
@@ -1597,7 +1623,20 @@ export default function MainApp() {
         
         <div className={`absolute inset-0 z-20 bg-background overflow-y-auto p-4 transition-transform duration-500 ${view === 'list' ? 'translate-y-0' : 'translate-y-full'}`}>
           <div className="grid gap-5 pb-32">
-            {roomsError ? (<div className="text-center p-10"><AlertTriangle size={28} className="mx-auto text-amber-500 mb-2" /><p className="text-gray-600 font-bold text-sm mb-3">Ads load nahi ho paye. Internet check karein.</p><button onClick={() => setRoomsReloadKey(k => k + 1)} className="bg-brand text-white px-5 py-2.5 rounded-xl font-black text-sm active:scale-95">Retry</button></div>) : sortedRooms.length === 0 ? (<div className="text-center p-10 text-gray-500 font-bold">Koi listing nahi mili.</div>) : (sortedRooms.map(room => (
+            {roomsLoading && rooms.length === 0 && !roomsError ? (
+              <div className="space-y-5">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div key={index} className="animate-pulse bg-white rounded-3xl overflow-hidden shadow-md border border-gray-100">
+                    <div className="h-48 bg-gray-100" />
+                    <div className="p-4 space-y-2">
+                      <div className="h-5 bg-gray-100 rounded-lg w-3/4" />
+                      <div className="h-4 bg-gray-100 rounded-lg w-2/3" />
+                      <div className="h-10 bg-gray-100 rounded-xl mt-3" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : roomsError ? (<div className="text-center p-10"><AlertTriangle size={28} className="mx-auto text-amber-500 mb-2" /><p className="text-gray-600 font-bold text-sm mb-3">Ads load nahi ho paye. Internet check karein.</p><button onClick={() => setRoomsReloadKey(k => k + 1)} className="bg-brand text-white px-5 py-2.5 rounded-xl font-black text-sm active:scale-95">Retry</button></div>) : sortedRooms.length === 0 ? (<div className="text-center p-10 text-gray-500 font-bold">Koi listing nahi mili.</div>) : (sortedRooms.map(room => (
               <div key={room._id} className={`bg-white rounded-3xl overflow-hidden shadow-md border ${room.isPromoted ? 'border-orange-200' : 'border-gray-50'}`}>
                 <a href={`/rooms/${room._id}`} onClick={(e) => handleRoomLink(e, room)} className="relative block" aria-label={`${room.title} — details dekho`}><img src={getImageUrl(room.image)} className="w-full h-48 object-cover bg-gray-200" alt={`${room.title} — ${room.category || 'Room'} in ${room.landmark || 'Hanumangarh'}`} loading="lazy" decoding="async" />{isFeatured(room) && <div className="absolute top-3 left-3 bg-orange-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1"><Star size={10} fill="currentColor" /> Featured</div>}<div className="absolute top-3 right-3 bg-white/90 px-3 py-1 rounded-full text-brand font-black">{room.price}</div></a>
                 <div className="p-4">
@@ -1634,12 +1673,12 @@ export default function MainApp() {
       </div>
 
       {isPickingLocation ? (
-        <div className="bg-white border-t py-3 px-4 flex items-center gap-3 z-50 h-[64px] shrink-0">
+        <div className="bg-white border-t py-3 px-4 flex items-center gap-3 z-50 h-16 shrink-0">
           <button onClick={cancelPickingLocation} className="px-5 py-2.5 rounded-2xl font-black text-sm border-2 border-gray-200 text-gray-600 active:scale-95 transition-transform">Cancel</button>
           <button onClick={confirmPickingLocation} className="flex-1 bg-brand text-white py-2.5 rounded-2xl font-black shadow-lg flex justify-center items-center gap-2 active:scale-95 transition-transform"><MapPin size={20}/> Confirm Location</button>
         </div>
       ) : (
-<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-[56px] shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={() => handlePostAdClick('room')} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200" aria-label="Post room ad" title="Post room ad"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/privacy')} className="hover:text-brand transition-colors">Privacy</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by 29 Dev's</a></div></div>
+<div className="shrink-0 flex flex-col z-50"><footer className="bg-white border-t py-1 px-10 flex justify-between items-center h-14 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]"><button onClick={() => setView('map')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'map' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><MapIcon size={22} strokeWidth={view === 'map' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">Map</span></button><button onClick={() => handlePostAdClick('room')} className="relative bg-brand text-white w-12 h-12 flex items-center justify-center rounded-2xl -mt-10 shadow-xl shadow-brand/40 border-4 border-white active:scale-90 transition-all duration-200" aria-label="Post room ad" title="Post room ad"><Plus size={30} strokeWidth={3} /></button><button onClick={() => setView('list')} className={`flex flex-col items-center gap-0.5 transition-all ${view === 'list' ? 'text-brand scale-110' : 'text-gray-400 opacity-60'}`}><List size={22} strokeWidth={view === 'list' ? 2.5 : 2} /><span className="text-[10px] font-black uppercase tracking-tighter">List</span></button></footer><div className="bg-white border-t border-gray-100 py-1 px-2 flex items-center justify-center gap-2 text-[9px] font-bold text-gray-400 whitespace-nowrap overflow-hidden"><button onClick={() => navigate('/about')} className="hover:text-brand transition-colors">About</button><span>•</span><button onClick={() => navigate('/terms')} className="hover:text-brand transition-colors">Terms</button><span>•</span><button onClick={() => navigate('/privacy')} className="hover:text-brand transition-colors">Privacy</button><span>•</span><button onClick={() => navigate('/refund')} className="hover:text-brand transition-colors">Refund</button><span>•</span><a href="https://amanbishnoi.oneapp.dev" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors active:scale-95 inline-block">Built with <Heart size={9} fill="currentColor" className="inline text-brand" /> by 29 Dev's</a></div></div>
       )}
       <div className={`fixed inset-0 z-[8000] transition-opacity duration-300 ${isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}><div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setIsMenuOpen(false)}></div><div className={`absolute top-0 left-0 bottom-0 w-[80%] max-w-sm bg-white flex flex-col transition-transform duration-300 ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}><div className="p-6 bg-brand/5 border-b"><h2 className="text-3xl font-black text-gray-800">Room<span className="text-brand">Khojo</span></h2></div><div className="p-4 space-y-2 flex-1 overflow-y-auto mt-4">{isLoggedIn && (<button onClick={() => { navigate('/dashboard'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><User size={20} className="text-brand"/> My Ads / Dashboard</div> <ChevronRight size={18} className="text-gray-400"/></button>)}{isLoggedIn && (<button onClick={handleLogout} className="w-full flex items-center justify-between p-4 rounded-2xl bg-red-50 hover:bg-red-100 font-bold text-red-600"><div className="flex items-center gap-3"><LogOut size={20}/> Logout</div> <ChevronRight size={18} className="text-red-300"/></button>)}{/* P2 #59: logout ab menu me bhi (dashboard settings ke saath) */}<button onClick={() => { navigate('/about'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Info size={20} className="text-brand"/> About Us</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/terms'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><FileText size={20} className="text-brand"/> Terms</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/privacy'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Lock size={20} className="text-brand"/> Privacy Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { navigate('/refund'); setIsMenuOpen(false); }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 font-bold text-gray-700"><div className="flex items-center gap-3"><Shield size={20} className="text-brand"/> Refund Policy</div> <ChevronRight size={18} className="text-gray-400"/></button><button onClick={() => { if (!isLoggedIn) { setIsMenuOpen(false); setAuthMode('login'); } else { navigate('/support'); setIsMenuOpen(false); } }} className="w-full flex items-center justify-between p-4 rounded-2xl bg-brand/5 hover:bg-brand/10 font-bold text-gray-700 border border-brand/20"><div className="flex items-center gap-3"><LifeBuoy size={20} className="text-brand"/> Support</div> <ChevronRight size={18} className="text-gray-400"/></button></div></div></div>
       {authMode && (

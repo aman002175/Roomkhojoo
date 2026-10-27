@@ -79,6 +79,14 @@ export default function UserDashboard() {
   const [claimBusy, setClaimBusy] = useState(false);
   const [claimSearched, setClaimSearched] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCompressingEdit, setIsCompressingEdit] = useState(false);
+  const [notice, setNotice] = useState('');
+  const noticeTimer = useRef(null);
+  const showNotice = (message) => {
+    setNotice(message);
+    clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(''), 3500);
+  };
   const [sysSettings, setSysSettings] = useState({ facilities: ['Wi-Fi', 'AC', 'Water 24x7', 'Electricity', 'Geyser', 'RO Water', 'Parking', 'CCTV', 'Meals', 'Attached Washroom'] });
 
   // ❤️ Saved ads (favorites) + unsave
@@ -96,6 +104,8 @@ export default function UserDashboard() {
     const t = setInterval(() => setDelCooldown((c) => c - 1), 1000);
     return () => clearInterval(t);
   }, [delCooldown]);
+
+  useEffect(() => () => clearTimeout(noticeTimer.current), []);
 
   const fetchSaved = () => {
     apiFetch(`${BASE_URL}/api/users/favorites`, { headers: authHeaders() })
@@ -171,20 +181,34 @@ export default function UserDashboard() {
   };
 
   const toggleRoomStatus = async (roomId) => {
+    const room = myRooms.find((item) => item._id === roomId);
+    if (!room) return;
+    const nextActive = !room.isActive;
+    setMyRooms((prev) => prev.map((item) => item._id === roomId ? { ...item, isActive: nextActive } : item));
     try {
       const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}/toggle-status`, { method: 'PATCH', headers: authHeaders() });
       const data = await res.json();
-      if (data.success) { setMyRooms(myRooms.map(room => room._id === roomId ? { ...room, isActive: data.isActive } : room)); }
-    } catch { alert('Status update fail ho gaya.'); }
+      if (!data.success) throw new Error(data.message || 'Status update fail ho gaya.');
+      setMyRooms((prev) => prev.map((item) => item._id === roomId ? { ...item, isActive: data.isActive } : item));
+    } catch {
+      setMyRooms((prev) => prev.map((item) => item._id === roomId ? { ...item, isActive: room.isActive } : item));
+      showNotice('Status update fail ho gaya. Dobara try karein.');
+    }
   };
 
   const deleteRoom = async (roomId) => {
     if (!window.confirm("Kya aap sach mein is Ad ko hamesha ke liye Delete karna chahte hain?")) return;
+    const room = myRooms.find((item) => item._id === roomId);
+    setMyRooms((prev) => prev.filter((item) => item._id !== roomId));
     try {
       const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}`, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
-      if (data.success) { setMyRooms(myRooms.filter(room => room._id !== roomId)); alert("Ad successfully deleted!"); }
-    } catch { alert('Delete fail ho gaya.'); }
+      if (!data.success) throw new Error(data.message || 'Delete fail ho gaya.');
+      showNotice('Ad delete ho gaya.');
+    } catch {
+      if (room) setMyRooms((prev) => [room, ...prev]);
+      showNotice('Delete fail ho gaya. Dobara try karein.');
+    }
   };
 
   // 🚨 OPEN EDIT MODAL
@@ -206,38 +230,121 @@ export default function UserDashboard() {
     setIsEditModalOpen(true);
   };
 
-  // 🚨 SUBMIT EDIT (Sends to Pending)
+  // 🗜️ Edit photos bhi post-ad jaisi compress karo — upload latency kam
+  const compressImage = (file, maxDim = 1600, quality = 0.8) => new Promise(resolve => {
+    try {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        try {
+          URL.revokeObjectURL(url);
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob(blob => {
+            if (!blob || blob.size >= file.size) return resolve(file);
+            resolve(new File([blob], (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }));
+          }, 'image/jpeg', quality);
+        } catch { resolve(file); }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    } catch { resolve(file); }
+  });
+
+  // 🚨 SUBMIT EDIT — regular ad turant live; optimistic UI se 4s wait feel nahi hota
   const submitEdit = async () => {
-    if(!editForm.title || !editForm.price || !editForm.mobile) return alert("All fields required!");
+    if (isSubmitting) return;
+    if (!editForm.title || !editForm.price || !editForm.mobile) return alert('All fields required!');
+    if (isCompressingEdit) return showNotice('Photos optimize ho rahi hain — ek second wait karein.');
+
+    const roomId = editingRoomId;
+    const sourceRoom = myRooms.find((room) => room._id === roomId);
+    const nextType = editForm.listingType === 'service' ? 'Service' : editForm.type;
+    const nextDescription = editForm.description.join(', ');
+    const nextMapUrl = (editForm.googleMapUrl || '').trim();
+    const optimisticRoom = sourceRoom ? {
+      ...sourceRoom,
+      title: editForm.title,
+      price: `₹${editForm.price}`,
+      type: nextType,
+      category: editForm.category,
+      landmark: editForm.landmark,
+      mobile: editForm.mobile,
+      description: nextDescription,
+      googleMapUrl: nextMapUrl,
+      image: editKeep[0] || editNew[0]?.url || sourceRoom.image,
+      images: [...editKeep, ...editNew.map((photo) => photo.url)]
+    } : null;
+
     setIsSubmitting(true);
+    setIsEditModalOpen(false);
+    if (optimisticRoom) {
+      setMyRooms((prev) => prev.map((room) => room._id === roomId ? optimisticRoom : room));
+    }
+    showNotice(sourceRoom?.isApproved === false ? 'Ad update ho raha hai…' : 'Ad live update ho raha hai…');
+
     try {
       const fd = new FormData();
-      fd.append('title', editForm.title); fd.append('price', `₹${editForm.price}`); fd.append('type', editForm.listingType === 'service' ? 'Service' : editForm.type);
+      fd.append('title', editForm.title); fd.append('price', `₹${editForm.price}`); fd.append('type', nextType);
       fd.append('category', editForm.category); fd.append('landmark', editForm.landmark); fd.append('mobile', editForm.mobile);
-      fd.append('description', editForm.description.join(', '));
-      fd.append('googleMapUrl', (editForm.googleMapUrl || '').trim()); // 🗺️ optional
+      fd.append('description', nextDescription);
+      fd.append('googleMapUrl', nextMapUrl);
       fd.append('keepImages', JSON.stringify(editKeep));
       editNew.forEach(p => fd.append('images', p.file));
 
-      const res = await apiFetch(`${BASE_URL}/api/rooms/${editingRoomId}/edit`, { method: 'PUT', headers: authHeaders(), body: fd, signal: AbortSignal.timeout(60000) }); // photos: 60s
+      const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}/edit`, { method: 'PUT', headers: authHeaders(), body: fd, signal: AbortSignal.timeout(60000) });
       const data = await res.json();
-      
-      if(data.success) {
-        alert("Ad Updated! Admin approval ke liye bhej diya gaya hai (Pending Mode).");
-        setIsEditModalOpen(false);
-        setRefreshKey(k => k + 1); // Refresh data
+      if (!data.success) throw new Error(data.message || 'Update fail ho gaya.');
+
+      if (data.room) {
+        setMyRooms((prev) => prev.map((room) => room._id === roomId ? data.room : room));
       }
-    } catch { alert("Error saving edits."); }
-    setIsSubmitting(false);
+      showNotice(data.message || 'Ad live update ho gaya.');
+      editNew.forEach((photo) => URL.revokeObjectURL(photo.url));
+      setEditNew([]);
+      setEditingRoomId(null);
+    } catch (error) {
+      if (optimisticRoom && sourceRoom) {
+        setMyRooms((prev) => prev.map((room) => room._id === roomId ? sourceRoom : room));
+      }
+      editNew.forEach((photo) => URL.revokeObjectURL(photo.url));
+      setEditNew([]);
+      showNotice(error?.message || 'Ad update fail ho gaya. Dobara try karein.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // 📸 Edit gallery me nayi photos add (max 6 total)
-  const addEditPhotos = (e) => {
+  const addEditPhotos = async (e) => {
     const files = Array.from(e.target.files || []);
-    if (editKeep.length + editNew.length + files.length > 6) alert('Max 6 photos allowed hai.');
-    const mapped = files.map(f => ({ file: f, url: URL.createObjectURL(f) }));
-    setEditNew(prev => [...prev, ...mapped].slice(0, Math.max(0, 6 - editKeep.length)));
     e.target.value = '';
+    if (files.length === 0) return;
+    const room = Math.max(0, 6 - editKeep.length - editNew.length);
+    if (room <= 0) return alert('Max 6 photos allowed hai — pehle koi photo hatao.');
+    let picked = files;
+    if (files.length > room) {
+      alert(`Sirf ${room} aur photo add ho sakti hain (max 6) — baaki skip.`);
+      picked = files.slice(0, room);
+    }
+    setIsCompressingEdit(true);
+    try {
+      const processed = [];
+      for (const file of picked) {
+        const compressed = await compressImage(file);
+        processed.push({ file: compressed, url: URL.createObjectURL(compressed) });
+      }
+      setEditNew((prev) => {
+        const next = [...prev, ...processed];
+        next.slice(Math.max(0, 6 - editKeep.length)).forEach((photo) => URL.revokeObjectURL(photo.url));
+        return next.slice(0, Math.max(0, 6 - editKeep.length));
+      });
+    } finally {
+      setIsCompressingEdit(false);
+    }
   };
 
   // 🔄 Renew helpers + submit (expired promo → payment → admin verify)
@@ -705,9 +812,9 @@ export default function UserDashboard() {
             </div>
             
             <div className="p-5 overflow-y-auto space-y-4 flex-1">
-              <div className="bg-blue-50 text-blue-800 p-3 rounded-xl flex gap-2 items-start text-xs font-bold">
+              <div className="bg-emerald-50 text-emerald-800 p-3 rounded-xl flex gap-2 items-start text-xs font-bold">
                 <ShieldAlert size={16} className="shrink-0 mt-0.5"/>
-                <p>Edit save karne par aapka Ad "Pending" mode mein chala jayega aur verification ke baad dobara live hoga.</p>
+                <p>{editForm.listingType === 'service' ? 'Changes save karte hi service listing update ho jayegi. Approval status wahi rahega.' : 'Changes save karte hi aapka regular ad live update ho jayega. Admin approval ka wait nahi karna padega.'}</p>
               </div>
 
               <div>
@@ -745,11 +852,17 @@ export default function UserDashboard() {
             </div>
 
             <div className="p-4 border-t bg-white sticky bottom-0 z-10 shrink-0">
-              <button onClick={submitEdit} disabled={isSubmitting} className="w-full bg-brand text-white py-4 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                {isSubmitting ? 'Saving Changes...' : 'Save & Send for Verification'}
+              <button onClick={submitEdit} disabled={isSubmitting || isCompressingEdit} className="w-full bg-brand text-white py-4 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-60">
+                {isCompressingEdit ? 'Photos optimize ho rahi hain...' : isSubmitting ? 'Saving Changes...' : 'Save Changes'}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {notice && (
+        <div className="fixed bottom-24 left-1/2 z-[10000] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-xl bg-gray-900 px-4 py-3 text-center text-xs font-bold text-white shadow-xl rk-fade-in">
+          {notice}
         </div>
       )}
     </div>

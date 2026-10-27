@@ -3,5 +3,6 @@ Allow: /
 Disallow: /dashboard
 Disallow: /support
 Disallow: /forgot-password
+Disallow: /verify-signup
 
 Sitemap: https://roomkhojoo.vercel.app/sitemap.xml

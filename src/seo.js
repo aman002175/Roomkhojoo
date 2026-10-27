@@ -26,7 +26,7 @@ const PUBLIC_ROUTES = {
   }
 };
 
-const PRIVATE_ROUTES = ['/dashboard', '/support', '/forgot-password'];
+const PRIVATE_ROUTES = ['/dashboard', '/support', '/forgot-password', '/verify-signup'];
 const ROOM_PATH = /^\/rooms\/[a-f0-9]{24}$/i;
 
 const getOrigin = () => {

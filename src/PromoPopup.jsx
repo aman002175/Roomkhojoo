@@ -92,6 +92,7 @@ export default function PromoPopup({ adminPath }) {
   const excluded =
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/support') ||
+    pathname.startsWith('/verify-signup') ||
     pathname === adminPath ||
     ['/about', '/terms', '/refund'].includes(pathname);
 
