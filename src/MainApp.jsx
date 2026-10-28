@@ -217,6 +217,7 @@ export default function MainApp() {
   const [view, setView] = useState('map'); 
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [clusterRooms, setClusterRooms] = useState(null); // 📍 pass-pass ki listings ka stack — tap par mini-list
+  const clusterOpenAtRef = useRef(0); // 🐛 mobile: touchstart par khuli sheet par same tap ka click backdrop ko band kar deta tha (blink)
   const [mapTick, setMapTick] = useState(0); // zoom/pan par markers dobara cluster ho sakein
   // P2 #40: URL se filters restore (reload/share par reset nahi hote)
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -1440,7 +1441,7 @@ export default function MainApp() {
       if (now - lastTapAt < 400) return;
       lastTapAt = now;
       mapUserMovedRef.current = true;
-      if (isCluster) { setClusterRooms(group.rooms); return; }
+      if (isCluster) { clusterOpenAtRef.current = Date.now(); setClusterRooms(group.rooms); return; }
       openRoomPopup(room);
       if (map.current) map.current.flyTo({ center: [room.lng, room.lat], zoom: 15.5 });
     };
@@ -1789,7 +1790,7 @@ export default function MainApp() {
 
       {/* 📍 Cluster mini-list — stack wali pin (ek jagah N listings) par tap */}
       {clusterRooms && clusterRooms.length > 0 && (
-        <div className="fixed inset-0 z-[8700] bg-black/50 backdrop-blur-[1px] flex items-end justify-center" onClick={() => setClusterRooms(null)}>
+        <div className="fixed inset-0 z-[8700] bg-black/50 backdrop-blur-[1px] flex items-end justify-center" onClick={() => { if (Date.now() - clusterOpenAtRef.current < 700) return; setClusterRooms(null); }}>
           <div className="bg-white w-full max-w-lg rounded-t-3xl max-h-[70dvh] overflow-y-auto p-4 pb-8 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3 mb-3">
               <div>
@@ -1800,7 +1801,7 @@ export default function MainApp() {
             </div>
             <div className="space-y-2">
               {clusterRooms.map(r => (
-                <button key={r._id} onClick={() => { setClusterRooms(null); openRoomPopup(r); }} className="w-full flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-2xl p-3 text-left active:scale-[0.98] transition-transform">
+                <button key={r._id} onClick={() => { if (Date.now() - clusterOpenAtRef.current < 700) return; setClusterRooms(null); openRoomPopup(r); }} className="w-full flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-2xl p-3 text-left active:scale-[0.98] transition-transform">
                   <img src={getImageUrl(r.image)} className="w-12 h-12 rounded-xl object-cover bg-gray-200 shrink-0" alt="" loading="lazy" />
                   <div className="min-w-0 flex-1">
                     <p className="font-black text-sm text-gray-800 truncate">{r.title}</p>
