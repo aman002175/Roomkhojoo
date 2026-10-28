@@ -7,6 +7,8 @@ import { safeImageUrl, telUrl, upiUrl } from './safeUrl';
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const BASE_URL = VITE_API_BASE_URL ? VITE_API_BASE_URL.replace(/\/api\/?$/, '') : 'https://roomkhojo-backend.vercel.app'; // P2 #58: sirf trailing /api strip
 const getImageUrl = (path) => safeImageUrl(path);
+// Number ho toh ₹ lagao, "Contact for price"/"Negotiable" jaisa text waisa hi bhejo
+const fmtPrice = (p) => { const t = String(p == null ? '' : p).trim(); return /^\d+$/.test(t) ? `₹${t}` : t; };
 
 // Logged-in API calls ke liye Bearer header
 const authHeaders = () => {
@@ -62,7 +64,7 @@ export default function UserDashboard() {
   // 🚨 EDIT STATES
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRoomId, setEditingRoomId] = useState(null);
-  const [editForm, setEditForm] = useState({ title: '', price: '', type: 'Boys', category: 'PG', landmark: '', mobile: '', description: [], googleMapUrl: '', listingType: 'room' });
+  const [editForm, setEditForm] = useState({ title: '', price: '', type: 'Boys', category: 'PG', landmark: '', mobile: '', ownerName: '', description: [], googleMapUrl: '', listingType: 'room' });
   const [editKeep, setEditKeep] = useState([]); // mevcut URLs (✕ se hatao)
   const [editNew, setEditNew] = useState([]); // nayi files [{file, url}]
   // 🔄 Renew states
@@ -221,7 +223,7 @@ export default function UserDashboard() {
     
     setEditForm({
       title: room.title, price: String(room.price || '').replace('₹', ''), type: room.type, // P2 #47: number/missing price par crash nahi
-      category: room.category, landmark: room.landmark, mobile: room.mobile, description: details,
+      category: room.category, landmark: room.landmark, mobile: room.mobile, ownerName: room.ownerName || '', description: details,
       googleMapUrl: room.googleMapUrl || '', listingType: isService ? 'service' : 'room'
     });
     setEditingRoomId(room._id);
@@ -268,11 +270,12 @@ export default function UserDashboard() {
     const optimisticRoom = sourceRoom ? {
       ...sourceRoom,
       title: editForm.title,
-      price: `₹${editForm.price}`,
+      price: fmtPrice(editForm.price),
       type: nextType,
       category: editForm.category,
       landmark: editForm.landmark,
       mobile: editForm.mobile,
+      ownerName: editForm.ownerName.trim() || sourceRoom.ownerName,
       description: nextDescription,
       googleMapUrl: nextMapUrl,
       image: editKeep[0] || editNew[0]?.url || sourceRoom.image,
@@ -288,8 +291,9 @@ export default function UserDashboard() {
 
     try {
       const fd = new FormData();
-      fd.append('title', editForm.title); fd.append('price', `₹${editForm.price}`); fd.append('type', nextType);
+      fd.append('title', editForm.title); fd.append('price', fmtPrice(editForm.price)); fd.append('type', nextType);
       fd.append('category', editForm.category); fd.append('landmark', editForm.landmark); fd.append('mobile', editForm.mobile);
+      fd.append('ownerName', editForm.ownerName.trim() || (sourceRoom?.ownerName || ''));
       fd.append('description', nextDescription);
       fd.append('googleMapUrl', nextMapUrl);
       fd.append('keepImages', JSON.stringify(editKeep));
@@ -827,9 +831,13 @@ export default function UserDashboard() {
               
               <div className="space-y-3">
                 <div><label className="text-xs font-bold text-gray-500 ml-1">{editForm.listingType === 'service' ? 'Service / Business Name' : 'Title'}</label><input type="text" value={editForm.title} onChange={(e) => setEditForm({...editForm, title: e.target.value})} placeholder={editForm.listingType === 'service' ? 'Business / Service name' : 'Title'} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
+                <div><label className="text-xs font-bold text-gray-500 ml-1">Aapka Name (listing par yahi dikhega)</label><input type="text" value={editForm.ownerName} onChange={(e) => setEditForm({...editForm, ownerName: e.target.value})} placeholder="Owner / Aapka naam" maxLength={60} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
                 <div className="flex gap-3">
-                  <div className="flex-1 min-w-0"><label className="text-xs font-bold text-gray-500 ml-1">{editForm.listingType === 'service' ? 'Price (₹)' : 'Rent (₹)'}</label><input type="number" value={editForm.price} onChange={(e) => setEditForm({...editForm, price: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
+                  <div className="flex-1 min-w-0"><label className="text-xs font-bold text-gray-500 ml-1">{editForm.listingType === 'service' ? 'Price (₹)' : 'Rent (₹)'}</label><input type="text" value={editForm.price} onChange={(e) => setEditForm({...editForm, price: e.target.value})} maxLength={40} placeholder="3000 ya Contact for price" className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
                   <div className="flex-1 min-w-0"><label className="text-xs font-bold text-gray-500 ml-1">Mobile No.</label><input type="number" value={editForm.mobile} onChange={(e) => setEditForm({...editForm, mobile: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border"/></div>
+                </div>
+                <div className="flex gap-2">
+                  {['Contact for price', 'Negotiable'].map(opt => (<button type="button" key={opt} onClick={() => setEditForm({...editForm, price: editForm.price === opt ? '' : opt})} className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-colors ${editForm.price === opt ? 'bg-brand text-white border-brand shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200 active:scale-95'}`}>{opt}</button>))}
                 </div>
                 <div><label className="text-xs font-bold text-gray-500 ml-1">Landmark</label><input type="text" value={editForm.landmark} onChange={(e) => setEditForm({...editForm, landmark: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>
                 <div><label className="text-xs font-bold text-gray-500 ml-1">Google Maps Link (optional)</label><input type="url" value={editForm.googleMapUrl || ''} onChange={(e) => setEditForm({...editForm, googleMapUrl: e.target.value})} placeholder="https://maps.app.goo.gl/..." className="w-full p-3 bg-gray-50 rounded-xl outline-none font-bold text-sm border" /></div>

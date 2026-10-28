@@ -109,6 +109,8 @@ const roomIdFromLocation = () => new URLSearchParams(window.location.search).get
 
   // 💰 "₹5,500" → 5500 (filter/sort ke liye)
   const priceNum = (p) => Number(String(p || '').replace(/\D/g, '')) || 0;
+  // Number ho toh ₹ lagao, "Contact for price"/"Negotiable" jaisa text waisa hi bhejo
+  const fmtPrice = (p) => { const t = String(p == null ? '' : p).trim(); return /^\d+$/.test(t) ? `₹${t}` : t; };
 
 // 📍 Haversine distance (meters) + format
 const distMeters = (lat1, lng1, lat2, lng2) => {
@@ -305,6 +307,7 @@ export default function MainApp() {
   const [contactGate, setContactGate] = useState(false);
   const [revealedContacts, setRevealedContacts] = useState({});
   const [contactUsage, setContactUsage] = useState(null);
+  const [revealLoading, setRevealLoading] = useState(null); // 📞 "Getting mobile number…" overlay (room id)
   const revealBusyRef = useRef(false);
   const [postImages, setPostImages] = useState([]); // [{file, url}] max 6 
   const [isCompressingPhotos, setIsCompressingPhotos] = useState(false); // P2 #37: compress ke dauran UI feedback
@@ -686,7 +689,7 @@ export default function MainApp() {
       const fd = new FormData();
       fd.append('listingType', postKind);
       if (postKind === 'service') fd.append('serviceDays', String(serviceDaysNum));
-      fd.append('title', postTitle); fd.append('price', `₹${postPrice}`); fd.append('category', postCategory); fd.append('type', postKind === 'service' ? 'Service' : postType); fd.append('landmark', postLandmark); fd.append('mobile', postMobile);
+      fd.append('title', postTitle); fd.append('price', fmtPrice(postPrice)); fd.append('category', postCategory); fd.append('type', postKind === 'service' ? 'Service' : postType); fd.append('landmark', postLandmark); fd.append('mobile', postMobile);
       fd.append('description', postKind === 'service' ? postDesc.trim() : selectedFacilities.join(', '));
       fd.append('lng', postLng); fd.append('lat', postLat); fd.append('isPromoted', adType === 'promo');
       fd.append('promoPlan', adType === 'promo' ? promoPlan : 'regular');
@@ -890,7 +893,7 @@ export default function MainApp() {
 
   // Sort: newest / price low-high / high-low
   const sortedRooms = useMemo(() => [...filteredRooms].sort((a, b) => {
-    if (sortBy === 'lo') return priceNum(a.price) - priceNum(b.price);
+    if (sortBy === 'lo') { const pa = priceNum(a.price), pb = priceNum(b.price); if (!pa !== !pb) return pa ? -1 : 1; return pa - pb; } // text price (Contact for price) last me
     if (sortBy === 'hi') return priceNum(b.price) - priceNum(a.price);
     return new Date(b.createdAt) - new Date(a.createdAt);
   }), [filteredRooms, sortBy]);
@@ -1319,22 +1322,28 @@ export default function MainApp() {
     if (revealed) { doContactNav(revealed, room, type); return; }
     if (revealBusyRef.current) return;
     revealBusyRef.current = true;
+    setRevealLoading(room._id);
     try {
       const res = await apiFetch(`${API_URL}/${room._id}/contact`, { headers: authHeaders() });
       const data = await res.json().catch(() => null);
       if (res.ok && data && data.success) {
         setRevealedContacts(prev => ({ ...prev, [room._id]: data.mobile }));
         setContactUsage({ used: data.used, limit: data.limit, remaining: data.remaining });
+        setRevealLoading(null);
         doContactNav(data.mobile, room, type);
       } else if (res.status === 429) {
+        setRevealLoading(null);
         if (data && data.used !== undefined) setContactUsage({ used: data.used, limit: data.limit, remaining: 0 });
         alert((data && data.message) || 'Aaj ka number-reveal limit khatam. Kal dobara try karo.');
       } else {
+        setRevealLoading(null);
         alert((data && data.message) || `Number reveal nahi hua (error ${res.status}).`);
       }
     } catch {
+      setRevealLoading(null);
       alert('Server connection failed.');
     } finally {
+      setRevealLoading(null);
       revealBusyRef.current = false;
     }
   };
@@ -1718,6 +1727,17 @@ export default function MainApp() {
         </div>
       )}
 
+      {/* 📞 Reveal loading — user ko screen par dikhe ki number aa raha hai */}
+      {revealLoading && (
+        <div className="fixed inset-0 z-[8600] bg-black/50 backdrop-blur-[2px] flex items-center justify-center p-6">
+          <div className="bg-white rounded-3xl px-8 py-7 shadow-2xl flex flex-col items-center gap-3 max-w-[85%]">
+            <Loader2 size={36} className="animate-spin text-brand" />
+            <p className="font-black text-base text-gray-800 text-center">Getting mobile number…</p>
+            <p className="text-[11px] font-bold text-gray-400 text-center -mt-1">Number reveal ho raha hai — ek second</p>
+          </div>
+        </div>
+      )}
+
       <div className={`fixed inset-0 z-[7000] bg-black/60 overflow-hidden transition-opacity ${isPostAdOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
         <div className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-[30px] flex flex-col transition-transform duration-500 ${isPostAdOpen ? 'translate-y-0' : 'translate-y-full'}`} style={{ maxHeight: '92dvh' }}>
           <div className="p-5 border-b shrink-0 flex justify-between items-start gap-3 sticky top-0 bg-white rounded-t-[30px] z-10">
@@ -1759,9 +1779,13 @@ export default function MainApp() {
                  )}
                </div>
                <div className="flex gap-3">
-                  <input type="number" value={postPrice} onChange={(e) => setPostPrice(e.target.value)} placeholder={postKind === 'service' ? 'Service price (₹)' : 'Rent (₹)/Month'} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
+                  <input type="text" value={postPrice} onChange={(e) => setPostPrice(e.target.value)} maxLength={40} placeholder={postKind === 'service' ? 'Service price (₹)' : 'Rent (₹)/Month'} className="flex-1 min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
                  <input type="tel" inputMode="numeric" value={postMobile} onChange={(e) => { const d = e.target.value.replace(/\D/g, ''); setPostMobile((d.length > 10 && d.startsWith('91') ? d.slice(2, 12) : d).slice(0, 10)); }} placeholder="Mobile No." className="flex-[1.5] min-w-0 p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/>
-               </div>
+                </div>
+                <div className="flex gap-2 mt-2 ml-1">
+                  {['Contact for price', 'Negotiable'].map(opt => (<button type="button" key={opt} onClick={() => setPostPrice(p => p === opt ? '' : opt)} className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-colors ${postPrice === opt ? 'bg-brand text-white border-brand shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200 active:scale-95'}`}>{opt}</button>))}
+                </div>
+                <p className="text-[10px] font-bold text-gray-400 ml-1">Price field me number ya "Contact for price"/"Negotiable" likh sakte hain.</p>
                 <p className="text-[10px] font-bold text-gray-400 ml-1">Mobile signup/profile se prefill hai — chaahein toh badal ya hata kar naya number daalein.</p>
                 {postKind === 'service' && (<p className="text-[10px] font-bold text-purple-500 ml-1">Service price customer ko dikhega; listing fee duration ke hisaab se neeche hai.</p>)}
               </div>
