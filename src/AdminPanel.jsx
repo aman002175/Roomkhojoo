@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { User, Users, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft, Search, MoreVertical, Ban, Trash2, Phone, Calendar, RefreshCw, Briefcase, Activity, Eye, Heart, LogIn, UserPlus, Pencil, Flag, Mail, KeyRound } from 'lucide-react';
+import { User, Users, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft, Search, MoreVertical, Ban, Trash2, Phone, Calendar, RefreshCw, Briefcase, Activity, Eye, Heart, LogIn, UserPlus, Pencil, Flag, Mail, KeyRound, Loader2 } from 'lucide-react';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (admin token)
 import { safeImageUrl, whatsappUrl } from './safeUrl';
 
@@ -106,6 +106,8 @@ export default function AdminPanel() {
   });
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const [adminRooms, setAdminRooms] = useState([]);
   const [activeTab, setActiveTab] = useState('analytics');
   // 👥 Registered users management
@@ -337,15 +339,26 @@ export default function AdminPanel() {
   };
 
   const handleLogin = async () => {
+    if (isLoggingIn) return;
+    const u = loginUser.trim(); const p = loginPass.trim();
+    if (!u || !p) { setLoginError('Username aur password dono daalein.'); return; }
+    setIsLoggingIn(true);
+    setLoginError('');
     try {
-      const res = await apiFetch(`${ADMIN_API}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: loginUser.trim(), password: loginPass.trim() }) });
-      const data = await res.json();
-      if (data.success && data.token) {
+      const res = await apiFetch(`${ADMIN_API}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p }), signal: AbortSignal.timeout(30000) });
+      const data = await res.json().catch(() => null);
+      if (data && data.success && data.token) {
         sessionStorage.setItem('roomkhojo_admin_token', data.token);
         setLoginUser(''); setLoginPass('');
         setIsAuthenticated(true);
-      } else alert(data.message || 'Login fail.');
-    } catch { alert("Server Error."); }
+      } else {
+        setLoginError(data?.message || (res.status >= 500 ? 'Server busy hai — thodi der baad try karein.' : 'Galat username ya password.'));
+      }
+    } catch {
+      setLoginError('Server se connect nahi ho raha — internet check karke dobara try karein.');
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   const handleChangeCredentials = async () => {
@@ -600,10 +613,11 @@ export default function AdminPanel() {
           <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-6 mx-auto"><ShieldAlert size={32}/></div>
           <h1 className="text-2xl font-black text-center mb-2">Admin Portal</h1>
           <div className="space-y-4 mb-8 mt-6">
-            <input type="text" value={loginUser} onChange={(e)=>setLoginUser(e.target.value)} placeholder="Admin Username" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold border" />
-            <input type="password" value={loginPass} onChange={(e)=>setLoginPass(e.target.value)} placeholder="Password" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold border" />
+            <input type="text" value={loginUser} onChange={(e)=>{ setLoginUser(e.target.value); setLoginError(''); }} placeholder="Admin Username" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold border" />
+            <input type="password" value={loginPass} onChange={(e)=>{ setLoginPass(e.target.value); setLoginError(''); }} onKeyDown={(e)=>{ if (e.key === 'Enter') handleLogin(); }} placeholder="Password" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold border" />
           </div>
-          <button onClick={handleLogin} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black flex justify-center items-center gap-2 active:scale-95"><Lock size={18} className="shrink-0"/> Unlock</button>
+          <button onClick={handleLogin} disabled={isLoggingIn} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black flex justify-center items-center gap-2 active:scale-95 disabled:opacity-60 disabled:cursor-wait transition-opacity">{isLoggingIn ? (<><Loader2 size={18} className="animate-spin" /> Logging in…</>) : (<><Lock size={18} /> Unlock</>)}</button>
+          {loginError && <p className="text-red-600 text-xs font-bold text-center mt-3">{loginError}</p>}
         </div>
       </div>
     );

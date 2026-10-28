@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, LogOut, Star, ArrowLeft, Settings, Bell, MapPin, Trash2, Edit3, X, Camera, ShieldAlert, Phone, Clock, Eye, Heart, RefreshCw, Link, AlertTriangle } from 'lucide-react';
+import { User, LogOut, Star, ArrowLeft, Settings, Bell, MapPin, Trash2, Edit3, X, Camera, ShieldAlert, Phone, Clock, Eye, Heart, RefreshCw, Link, AlertTriangle, Loader2 } from 'lucide-react';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout
 import { safeImageUrl, telUrl, upiUrl } from './safeUrl';
 
@@ -84,10 +84,10 @@ export default function UserDashboard() {
   const [isCompressingEdit, setIsCompressingEdit] = useState(false);
   const [notice, setNotice] = useState('');
   const noticeTimer = useRef(null);
-  const showNotice = (message) => {
+  const showNotice = (message, ms = 3500) => {
     setNotice(message);
     clearTimeout(noticeTimer.current);
-    noticeTimer.current = setTimeout(() => setNotice(''), 3500);
+    noticeTimer.current = setTimeout(() => setNotice(''), ms);
   };
   const [sysSettings, setSysSettings] = useState({ facilities: ['Wi-Fi', 'AC', 'Water 24x7', 'Electricity', 'Geyser', 'RO Water', 'Parking', 'CCTV', 'Meals', 'Attached Washroom'] });
 
@@ -256,7 +256,9 @@ export default function UserDashboard() {
     } catch { resolve(file); }
   });
 
-  // 🚨 SUBMIT EDIT — regular ad turant live; optimistic UI se 4s wait feel nahi hota
+  // 🚨 SUBMIT EDIT — save tabhi maana jaata hai jab server confirm kare.
+  //    Modal save ke dauran BAND nahi hota (button par "Saving Changes…" spinner),
+  //    fail hone par user seedha dobara try kar sakta hai.
   const submitEdit = async () => {
     if (isSubmitting) return;
     if (!editForm.title || !editForm.price || !editForm.mobile) return alert('All fields required!');
@@ -267,27 +269,8 @@ export default function UserDashboard() {
     const nextType = editForm.listingType === 'service' ? 'Service' : editForm.type;
     const nextDescription = editForm.description.join(', ');
     const nextMapUrl = (editForm.googleMapUrl || '').trim();
-    const optimisticRoom = sourceRoom ? {
-      ...sourceRoom,
-      title: editForm.title,
-      price: fmtPrice(editForm.price),
-      type: nextType,
-      category: editForm.category,
-      landmark: editForm.landmark,
-      mobile: editForm.mobile,
-      ownerName: editForm.ownerName.trim() || sourceRoom.ownerName,
-      description: nextDescription,
-      googleMapUrl: nextMapUrl,
-      image: editKeep[0] || editNew[0]?.url || sourceRoom.image,
-      images: [...editKeep, ...editNew.map((photo) => photo.url)]
-    } : null;
 
     setIsSubmitting(true);
-    setIsEditModalOpen(false);
-    if (optimisticRoom) {
-      setMyRooms((prev) => prev.map((room) => room._id === roomId ? optimisticRoom : room));
-    }
-    showNotice(sourceRoom?.isApproved === false ? 'Ad update ho raha hai…' : 'Ad live update ho raha hai…');
 
     try {
       const fd = new FormData();
@@ -299,24 +282,44 @@ export default function UserDashboard() {
       fd.append('keepImages', JSON.stringify(editKeep));
       editNew.forEach(p => fd.append('images', p.file));
 
-      const res = await apiFetch(`${BASE_URL}/api/rooms/${roomId}/edit`, { method: 'PUT', headers: authHeaders(), body: fd, signal: AbortSignal.timeout(60000) });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.message || 'Update fail ho gaya.');
+      // Never-throw sender: {res, data} — non-JSON error pages (502/504) par data: null
+      const send = () => apiFetch(`${BASE_URL}/api/rooms/${roomId}/edit`, { method: 'PUT', headers: authHeaders(), body: fd, signal: AbortSignal.timeout(60000) })
+        .then(res => res.json().then(data => ({ res, data })).catch(() => ({ res, data: null })))
+        .catch(() => ({ res: { status: 0 }, data: null }));
 
-      if (data.room) {
-        setMyRooms((prev) => prev.map((room) => room._id === roomId ? data.room : room));
-      }
+      let out = await send();
+      // Cold-start / 5xx / network glitch: ek baar automatic retry (jaise 3-4 try ke baad aana)
+      if (!out.data || out.res.status === 0 || out.res.status >= 500) out = await send();
+      const { res, data } = out;
+
+      if (res.status === 401) throw new Error('Session expire ho gaya — dashboard band karke dobara login karein.');
+      if (!data) throw new Error(res.status === 0 || res.status >= 500 ? 'Server busy hai — internet check karke dobara try karein.' : `Update fail (error ${res.status}).`);
+      if (!data.success) throw new Error(data.message || 'Ad update fail ho gaya.');
+
+      // ✅ Server confirm kar chuka hai — tabhi list update + modal close + success notice
+      const savedRoom = data.room || (sourceRoom ? {
+        ...sourceRoom,
+        title: editForm.title,
+        price: fmtPrice(editForm.price),
+        type: nextType,
+        category: editForm.category,
+        landmark: editForm.landmark,
+        mobile: editForm.mobile,
+        ownerName: editForm.ownerName.trim() || sourceRoom.ownerName,
+        description: nextDescription,
+        googleMapUrl: nextMapUrl,
+        image: editKeep[0] || editNew[0]?.url || sourceRoom.image,
+        images: [...editKeep, ...editNew.map((photo) => photo.url)]
+      } : null);
+      if (savedRoom) setMyRooms((prev) => prev.map((room) => room._id === roomId ? savedRoom : room));
+      setIsEditModalOpen(false);
       showNotice(data.message || 'Ad live update ho gaya.');
       editNew.forEach((photo) => URL.revokeObjectURL(photo.url));
       setEditNew([]);
       setEditingRoomId(null);
     } catch (error) {
-      if (optimisticRoom && sourceRoom) {
-        setMyRooms((prev) => prev.map((room) => room._id === roomId ? sourceRoom : room));
-      }
-      editNew.forEach((photo) => URL.revokeObjectURL(photo.url));
-      setEditNew([]);
-      showNotice(error?.message || 'Ad update fail ho gaya. Dobara try karein.');
+      // ❌ Fail — modal khula chhodo (edits safe), sirf clear error dikhao
+      showNotice(error?.message || 'Ad update fail ho gaya. Dobara try karein.', 6000);
     } finally {
       setIsSubmitting(false);
     }
@@ -861,7 +864,7 @@ export default function UserDashboard() {
 
             <div className="p-4 border-t bg-white sticky bottom-0 z-10 shrink-0">
               <button onClick={submitEdit} disabled={isSubmitting || isCompressingEdit} className="w-full bg-brand text-white py-4 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-60">
-                {isCompressingEdit ? 'Photos optimize ho rahi hain...' : isSubmitting ? 'Saving Changes...' : 'Save Changes'}
+                {isCompressingEdit ? 'Photos optimize ho rahi hain...' : isSubmitting ? (<><Loader2 size={18} className="animate-spin" /> Saving Changes…</>) : 'Save Changes'}
               </button>
             </div>
           </div>
