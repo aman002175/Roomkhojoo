@@ -35,6 +35,7 @@ const ACTIVITY_META = {
   'room.edit': { label: 'Listing edit ki', icon: Pencil, cls: 'bg-blue-50 text-blue-600' },
   'room.delete': { label: 'Listing delete ki', icon: Trash2, cls: 'bg-red-50 text-red-600' },
   'room.approve': { label: 'Ad approve (admin)', icon: Check, cls: 'bg-emerald-50 text-emerald-700' },
+  'room.complimentary': { label: 'Complimentary VIP toggle (admin)', icon: Crown, cls: 'bg-amber-50 text-amber-600' },
   'room.toggle_status': { label: 'Listing on/off ki', icon: RefreshCw, cls: 'bg-gray-100 text-gray-600' },
   'room.reported': { label: 'Ad report hua', icon: Flag, cls: 'bg-red-50 text-red-600' },
   'room.renew_requested': { label: 'Promo renew bheja', icon: RefreshCw, cls: 'bg-orange-50 text-orange-600' },
@@ -139,6 +140,8 @@ export default function AdminPanel() {
   const [activityFeed, setActivityFeed] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityFilter, setActivityFilter] = useState('');
+  // 🎁 Complimentary VIP checkbox (pending approve card ke liye roomId → bool)
+  const [complimentaryChecked, setComplimentaryChecked] = useState({});
   // 🎧 Support tickets
   const [tickets, setTickets] = useState([]);
   const [openCount, setOpenCount] = useState(0);
@@ -470,18 +473,50 @@ export default function AdminPanel() {
   };
 
   // P2 #52: approve/delete — status check + busy guard + server truth refetch (rollback)
-  const handleApprove = async (id) => {
+  // 🎁 complimentary=true → relative/friend VIP: premium milega par earning count nahi hogi
+  const handleApprove = async (id, complimentary = false) => {
     if (actionBusy) return;
     setActionBusy(id);
     try {
-      const res = await apiFetch(`${API_URL}/${id}/approve`, { method: 'PATCH', headers: adminAuthHeaders() });
+      const res = await apiFetch(`${API_URL}/${id}/approve`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() },
+        body: JSON.stringify({ complimentary })
+      });
       const data = await res.json().catch(() => ({ success: false }));
       if (!res.ok || !data.success) alert(data.message || `Approve fail ho gaya (${res.status}).`);
+      else {
+        setComplimentaryChecked(prev => { const n = { ...prev }; delete n[id]; return n; });
+      }
     } catch {
       alert('Server connection failed — approve nahi hua.');
     }
     setActionBusy(null);
     setRefreshKey(k => k + 1); // server truth wapas (fail par bhi state rollback)
+  };
+
+  // 🎁 Complimentary ON/OFF — approve ke baad bhi kabhi bhi (live ads me)
+  const toggleComplimentary = async (room) => {
+    if (actionBusy) return;
+    const next = !room.complimentary;
+    const label = next
+      ? `${room.title}: complimentary VIP ON karein? Is ad ki earning dashboard me count NAHI hogi.`
+      : `${room.title}: complimentary OFF karein? Is ad ki earning wapas count hone lag jayegi.`;
+    if (!window.confirm(label)) return;
+    setActionBusy(room._id);
+    try {
+      const res = await apiFetch(`${API_URL}/${room._id}/complimentary`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() },
+        body: JSON.stringify({ complimentary: next })
+      });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (!res.ok || !data.success) alert(data.message || `Update fail ho gaya (${res.status}).`);
+    } catch {
+      alert('Server connection failed — update nahi hua.');
+    }
+    setActionBusy(null);
+    setRefreshKey(k => k + 1);
   };
 
   const handleDelete = async (id) => {
@@ -577,8 +612,9 @@ export default function AdminPanel() {
   const pendingAds = adminRooms.filter(r => !r.isApproved);
   const liveAds = adminRooms.filter(r => r.isApproved);
   const promotedCount = adminRooms.filter(r => r.isPromoted).length;
-  // #56: server stats fail ho toh client estimate (fallback)
-  const estRevenue = ((adminRooms.length - promotedCount) * Number(sysPricing.regular || 0)) + (promotedCount * Number(sysPricing.promo7 || 299));
+  // #56: server stats fail ho toh client estimate (fallback) — complimentary VIP exclude
+  const paidPromotedCount = adminRooms.filter(r => r.isPromoted && !r.complimentary).length;
+  const estRevenue = ((adminRooms.length - promotedCount) * Number(sysPricing.regular || 0)) + (paidPromotedCount * Number(sysPricing.promo7 || 299));
   const uniqueUsersCount = new Set(adminRooms.filter(r => r.userId && r.userId !== 'unknown_user').map(r => r.userId)).size;
   const revenueTotal = stats ? stats.totalRevenue : estRevenue;
   const serviceDailyRate = Math.max(0, Math.floor(Number(sysPricing.serviceDailyRate) || 0));
@@ -616,7 +652,7 @@ export default function AdminPanel() {
         {/* Analytics Tab */}
         {activeTab === 'analytics' && (
           <div className="space-y-4 pb-10">
-            <div className="grid grid-cols-2 gap-3"><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Registered Users</p><p className="text-2xl font-black text-gray-800">{stats ? (stats.registeredUsers ?? stats.uniqueUsers) : uniqueUsersCount}</p></div><div className="bg-green-50 p-4 rounded-2xl shadow-sm border border-green-100"><p className="text-xs font-bold text-green-700 uppercase">{stats ? 'Revenue (Recorded)' : 'Est. Revenue'}</p><p className="text-2xl font-black text-green-800">₹{revenueTotal}</p>{stats ? (<p className="text-[10px] font-bold text-green-600 mt-1">Promo ₹{stats.promoRevenue} • Service ₹{stats.serviceRevenue || 0} • Banner ₹{stats.bannerRevenue}</p>) : (<p className="text-[10px] font-bold text-green-600 mt-1">Approx — server stats load nahi hue</p>)}</div><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Ads</p><p className="text-2xl font-black text-gray-800">{stats ? stats.totalAds : adminRooms.length}</p><p className="text-[10px] font-bold text-gray-400 mt-1">{stats ? `${stats.liveAds} live • ${stats.pendingAds} pending${stats.expiredAds ? ` • ${stats.expiredAds} expired` : ''}` : ''}</p></div><div className="bg-orange-50 p-4 rounded-2xl shadow-sm border border-orange-100"><p className="text-xs font-bold text-orange-700 uppercase">Promo Ads</p><p className="text-2xl font-black text-orange-800">{stats ? stats.promoAds : promotedCount}</p>{stats ? (<p className="text-[10px] font-bold text-orange-600 mt-1">Banner LIVE: {stats.bannerActive}</p>) : null}</div></div>
+            <div className="grid grid-cols-2 gap-3"><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Registered Users</p><p className="text-2xl font-black text-gray-800">{stats ? (stats.registeredUsers ?? stats.uniqueUsers) : uniqueUsersCount}</p></div><div className="bg-green-50 p-4 rounded-2xl shadow-sm border border-green-100"><p className="text-xs font-bold text-green-700 uppercase">{stats ? 'Revenue (Recorded)' : 'Est. Revenue'}</p><p className="text-2xl font-black text-green-800">₹{revenueTotal}</p>{stats ? (<p className="text-[10px] font-bold text-green-600 mt-1">Promo ₹{stats.promoRevenue} • Service ₹{stats.serviceRevenue || 0} • Banner ₹{stats.bannerRevenue}{stats.complimentaryAds ? ` • ${stats.complimentaryAds} complimentary VIP (excluded)` : ''}</p>) : (<p className="text-[10px] font-bold text-green-600 mt-1">Approx — server stats load nahi hue</p>)}</div><div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Ads</p><p className="text-2xl font-black text-gray-800">{stats ? stats.totalAds : adminRooms.length}</p><p className="text-[10px] font-bold text-gray-400 mt-1">{stats ? `${stats.liveAds} live • ${stats.pendingAds} pending${stats.expiredAds ? ` • ${stats.expiredAds} expired` : ''}` : ''}</p></div><div className="bg-orange-50 p-4 rounded-2xl shadow-sm border border-orange-100"><p className="text-xs font-bold text-orange-700 uppercase">Promo Ads</p><p className="text-2xl font-black text-orange-800">{stats ? stats.promoAds : promotedCount}</p>{stats ? (<p className="text-[10px] font-bold text-orange-600 mt-1">Banner LIVE: {stats.bannerActive}</p>) : null}</div></div>
             {stats && (
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
                 <p className="text-xs font-bold text-gray-500 uppercase mb-2">Revenue Breakdown (recorded)</p>
@@ -775,8 +811,22 @@ export default function AdminPanel() {
                     <button onClick={() => handleBannerApprove(room._id, false)} disabled={!!actionBusy} className="bg-gray-200 text-gray-600 px-3 py-2 rounded-lg text-[11px] font-black active:scale-95 shrink-0 ml-2 disabled:opacity-60">Remove</button>
                   </div>
                 )}
+                {(room.listingType === 'service' || (room.promoRequested && room.promoRequested !== 'regular')) && (
+                <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer active:scale-[0.995] transition-transform ${(complimentaryChecked[room._id] ?? !!room.complimentary) ? 'bg-amber-50 border-amber-300' : 'bg-gray-50 border-gray-200'}`}>
+                  <input
+                    type="checkbox"
+                    checked={complimentaryChecked[room._id] ?? !!room.complimentary}
+                    onChange={(e) => setComplimentaryChecked(prev => ({ ...prev, [room._id]: e.target.checked }))}
+                    className="mt-0.5 w-4 h-4 accent-amber-500 shrink-0"
+                  />
+                  <span className="min-w-0">
+                    <span className="text-xs font-black text-gray-700 flex items-center gap-1"><Crown size={13} className="text-amber-500 shrink-0" /> Complimentary VIP (relative/friend)</span>
+                    <span className="block text-[10px] font-bold text-gray-500 mt-0.5">Premium dikhega par paisa nahi liya — iski earning dashboard me count NAHI hogi.</span>
+                  </span>
+                </label>
+                )}
                 <div className="flex gap-2 mt-1">
-                  <button onClick={() => handleApprove(room._id)} disabled={!!actionBusy} className="flex-1 bg-green-500 text-white py-3 rounded-xl text-sm font-black flex items-center justify-center gap-1.5 active:scale-95 transition-transform shadow-lg shadow-green-500/20 disabled:opacity-60">{actionBusy === room._id ? 'Process ho raha hai…' : (<><Check size={18} strokeWidth={3}/> Verify Payment & Approve</>)}</button>
+                  <button onClick={() => handleApprove(room._id, complimentaryChecked[room._id] ?? !!room.complimentary)} disabled={!!actionBusy} className="flex-1 bg-green-500 text-white py-3 rounded-xl text-sm font-black flex items-center justify-center gap-1.5 active:scale-95 transition-transform shadow-lg shadow-green-500/20 disabled:opacity-60">{actionBusy === room._id ? 'Process ho raha hai…' : (<><Check size={18} strokeWidth={3}/>{(complimentaryChecked[room._id] ?? !!room.complimentary) ? 'Approve as Complimentary VIP' : 'Verify Payment & Approve'}</>)}</button>
                   <button onClick={() => handleDelete(room._id)} disabled={!!actionBusy} className="w-14 bg-red-50 text-red-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-red-100 disabled:opacity-60"><X size={20} strokeWidth={3}/></button>
                 </div>
               </div>
@@ -807,7 +857,10 @@ export default function AdminPanel() {
                   <div className="flex-1">
                     <div className="flex justify-between items-start">
                       <h4 className="font-black text-gray-800 leading-tight text-base">{room.title}</h4>
-                      <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider">Live</span>
+                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                        {room.complimentary && <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider flex items-center gap-1"><Crown size={10} /> VIP (No Earning)</span>}
+                        <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider">Live</span>
+                      </div>
                     </div>
                     <p className="text-brand font-black text-sm mt-0.5">{room.price} <span className="text-[10px] text-gray-400 font-bold ml-1">({room.category} • {room.type})</span></p>
                     <p className="text-gray-500 text-[10px] font-bold mt-1.5 flex items-center gap-1"><User size={10}/> {room.ownerName || 'Owner'} <span className="mx-1">•</span> <Smartphone size={10}/> {room.mobile}</p>
@@ -836,6 +889,7 @@ export default function AdminPanel() {
                   <div className="flex-1 bg-gray-50 border border-gray-100 p-2 rounded-xl flex items-center justify-center text-xs font-bold text-gray-600">
                     Plan Status: <span className="ml-1.5">{getPlanStatus(room)}</span>
                   </div>
+                  <button onClick={() => toggleComplimentary(room)} disabled={!!actionBusy} className={`px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform border disabled:opacity-60 ${room.complimentary ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-amber-600 border-amber-200'}`} title="Complimentary VIP — earning count karni hai ya nahi"><Crown size={13} /> {room.complimentary ? 'VIP: ON' : 'VIP: OFF'}</button>
                   <button onClick={() => handleDelete(room._id)} disabled={!!actionBusy} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform border border-red-100 disabled:opacity-60"><X size={14} strokeWidth={3}/> Delete Ad</button>
                 </div>
               </div>
