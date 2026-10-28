@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { User, Users, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft, Search, MoreVertical, Ban, Trash2, Phone, Calendar, RefreshCw, Briefcase } from 'lucide-react';
+import { User, Users, LogOut, LayoutDashboard, Check, X, Settings, Lock, ShieldAlert, Save, Plus, BarChart3, Clock, MessageCircle, Smartphone, AlertTriangle, MapPin, Star, Megaphone, Link, Crown, Send, ArrowLeft, Search, MoreVertical, Ban, Trash2, Phone, Calendar, RefreshCw, Briefcase, Activity, Eye, Heart, LogIn, UserPlus, Pencil, Flag, Mail, KeyRound } from 'lucide-react';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (admin token)
 import { safeImageUrl, whatsappUrl } from './safeUrl';
 
@@ -9,6 +9,74 @@ const API_URL = `${BASE_URL}/api/rooms`;
 const ADMIN_API = `${BASE_URL}/api/admin`;
 const SUPPORT_API = `${BASE_URL}/api/support`;
 const getImageUrl = (path) => safeImageUrl(path);
+
+// ⏱️ "2h pehle" style relative time (activity feed + user cards)
+const timeAgo = (d) => {
+  if (!d) return '';
+  const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
+  if (s < 60) return 'abhi abhi';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m pehle`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h pehle`;
+  const days = Math.floor(h / 24);
+  if (days < 30) return `${days}d pehle`;
+  return new Date(d).toLocaleDateString('en-IN');
+};
+
+// 🏷️ Audit action → human label (Hinglish) + icon + color
+const ACTIVITY_META = {
+  'user.account_created': { label: 'Account banaya', icon: UserPlus, cls: 'bg-emerald-50 text-emerald-600' },
+  'user.login': { label: 'Login kiya', icon: LogIn, cls: 'bg-blue-50 text-blue-600' },
+  'user.password_changed': { label: 'Password badla', icon: KeyRound, cls: 'bg-amber-50 text-amber-600' },
+  'user.email_changed': { label: 'Email badla', icon: Mail, cls: 'bg-amber-50 text-amber-600' },
+  'user.account_deleted': { label: 'Account delete kiya', icon: Trash2, cls: 'bg-red-50 text-red-600' },
+  'room.create': { label: 'Nayi listing post ki', icon: Plus, cls: 'bg-emerald-50 text-emerald-600' },
+  'room.edit': { label: 'Listing edit ki', icon: Pencil, cls: 'bg-blue-50 text-blue-600' },
+  'room.delete': { label: 'Listing delete ki', icon: Trash2, cls: 'bg-red-50 text-red-600' },
+  'room.approve': { label: 'Ad approve (admin)', icon: Check, cls: 'bg-emerald-50 text-emerald-700' },
+  'room.toggle_status': { label: 'Listing on/off ki', icon: RefreshCw, cls: 'bg-gray-100 text-gray-600' },
+  'room.reported': { label: 'Ad report hua', icon: Flag, cls: 'bg-red-50 text-red-600' },
+  'room.renew_requested': { label: 'Promo renew bheja', icon: RefreshCw, cls: 'bg-orange-50 text-orange-600' },
+  'room.claim.approve': { label: 'Claim approve (admin)', icon: Check, cls: 'bg-blue-50 text-blue-600' },
+  'room.claim.reject': { label: 'Claim reject (admin)', icon: X, cls: 'bg-gray-100 text-gray-600' },
+  'room.banner.approve': { label: 'Banner approve (admin)', icon: Megaphone, cls: 'bg-purple-50 text-purple-600' },
+  'room.banner.revoke': { label: 'Banner revoke (admin)', icon: Megaphone, cls: 'bg-gray-100 text-gray-600' },
+  'contact.reveal': { label: 'Number reveal kiya', icon: Eye, cls: 'bg-cyan-50 text-cyan-600' },
+  'admin.user_status': { label: 'Status change (admin)', icon: ShieldAlert, cls: 'bg-amber-50 text-amber-700' },
+  'admin.user_deleted': { label: 'User delete (admin)', icon: Trash2, cls: 'bg-red-50 text-red-700' },
+  'admin.settings_updated': { label: 'Settings update (admin)', icon: Settings, cls: 'bg-gray-100 text-gray-600' },
+  'admin.credentials_changed': { label: 'Admin credentials badle', icon: Lock, cls: 'bg-gray-100 text-gray-600' },
+  'admin.login_failed': { label: 'Admin login fail', icon: Lock, cls: 'bg-red-50 text-red-600' },
+  'admin.rooms_migrated': { label: 'Rooms migrate (admin)', icon: RefreshCw, cls: 'bg-gray-100 text-gray-600' }
+};
+
+const activityMeta = (action) => ACTIVITY_META[action] || { label: action, icon: Activity, cls: 'bg-gray-100 text-gray-600' };
+
+// Ek activity row (Analytics feed + user profile dono me same)
+const ActivityRow = ({ item }) => {
+  const meta = activityMeta(item.action);
+  const Icon = meta.icon;
+  const extra = [];
+  if (item.action === 'contact.reveal' && item.ownerName) extra.push(`Ad: ${item.targetName || '—'} → owner: ${item.ownerName}`);
+  else if (item.targetName) extra.push(item.targetName);
+  else if (item.details && item.details.method) extra.push(item.details.method === 'google' ? 'Google se' : 'Email OTP se');
+  if (item.details && item.details.status) extra.push(`→ ${item.details.status}`);
+  if (item.details && item.details.reason) extra.push(item.details.reason);
+  return (
+    <div className="p-3 flex items-start gap-2.5 border-b border-gray-50 last:border-0">
+      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${meta.cls}`}><Icon size={15} /></span>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-bold text-gray-600 leading-snug">
+          <span className="font-black text-gray-900">{item.actorName || (item.actorRole === 'admin' ? 'Admin' : 'System')}</span>
+          {' — '}{meta.label}
+        </p>
+        {extra.length > 0 && <p className="text-[10px] font-bold text-gray-400 truncate mt-0.5">{extra.join(' • ')}</p>}
+      </div>
+      <span className="text-[10px] font-bold text-gray-400 shrink-0 whitespace-nowrap">{timeAgo(item.createdAt)}</span>
+    </div>
+  );
+};
 
 // Admin JWT (sessionStorage me) — hardcoded 'x-admin-secret' hata diya (C5 fix)
 const adminAuthHeaders = () => {
@@ -67,6 +135,10 @@ export default function AdminPanel() {
   const [sysContactLimit, setSysContactLimit] = useState(15); // 📞 number reveal daily limit
 
   const [refreshKey, setRefreshKey] = useState(0);
+  // 🕘 Activity feed (Analytics tab) — signup, listing, reveal, moderation sab ek jagah
+  const [activityFeed, setActivityFeed] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityFilter, setActivityFilter] = useState('');
   // 🎧 Support tickets
   const [tickets, setTickets] = useState([]);
   const [openCount, setOpenCount] = useState(0);
@@ -146,6 +218,13 @@ export default function AdminPanel() {
       .then(res => res.json())
       .then(data => { if (data.success) setStats(data.stats); })
       .catch(() => { /* stats optional */ });
+    // 🕘 Activity feed (Analytics tab) — latest 60 events
+    setActivityLoading(true);
+    apiFetch(`${ADMIN_API}/activity?limit=60`, { headers: adminAuthHeaders() })
+      .then(res => res.json())
+      .then(data => { if (data.success) setActivityFeed(data.items || []); })
+      .catch(() => { /* activity optional */ })
+      .finally(() => setActivityLoading(false));
   }, [isAuthenticated, refreshKey]);
 
   // 👥 Users tab: search + list (debounced)
@@ -519,7 +598,7 @@ export default function AdminPanel() {
         <div className="flex gap-2">
           <button onClick={() => setRefreshKey(k => k + 1)} className="bg-white/10 p-2 rounded-lg active:scale-95 transition-transform" title="Refresh Data"><BarChart3 size={16} /></button>
           {/* P2 #59: Exit par saari admin state reset — next login par stale data flash na ho */}
-          <button onClick={() => { sessionStorage.removeItem('roomkhojo_admin_token'); setIsAuthenticated(false); setAdminRooms([]); setTickets([]); setClaims([]); setOpenCount(0); setStats(null); setChatTicketId(null); setAdminReply({}); setActiveTab('analytics'); setMigratePreview(null); setMigrateEmail(''); setOldPass(''); setNewAdminUser(''); setNewAdminPass(''); setAdminUsers([]); setUsersTotal(0); setUserSearch(''); setUserMenuId(null); setUserProfile(null); }} className="bg-red-500/20 text-red-100 p-2 rounded-lg text-sm font-bold flex items-center gap-2 active:scale-95 transition-transform"><LogOut size={16} className="shrink-0"/> Exit</button>
+          <button onClick={() => { sessionStorage.removeItem('roomkhojo_admin_token'); setIsAuthenticated(false); setAdminRooms([]); setTickets([]); setClaims([]); setOpenCount(0); setStats(null); setChatTicketId(null); setAdminReply({}); setActiveTab('analytics'); setMigratePreview(null); setMigrateEmail(''); setOldPass(''); setNewAdminUser(''); setNewAdminPass(''); setAdminUsers([]); setUsersTotal(0); setUserSearch(''); setUserMenuId(null); setUserProfile(null); setActivityFeed([]); setActivityFilter(''); }} className="bg-red-500/20 text-red-100 p-2 rounded-lg text-sm font-bold flex items-center gap-2 active:scale-95 transition-transform"><LogOut size={16} className="shrink-0"/> Exit</button>
         </div>
       </header>
       
@@ -549,6 +628,32 @@ export default function AdminPanel() {
                 <p className="text-[10px] font-bold text-gray-400 mt-2">Note: sirf un ads ka record jinka payment is fix ke baad approve hua.</p>
               </div>
             )}
+            {/* 🕘 Activity Feed — kisne kab kya kiya (signup, listing, reveal, moderation) */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b bg-gray-50 flex items-center justify-between gap-2">
+                <h3 className="font-black text-gray-800 flex items-center gap-2"><Activity size={18} className="text-brand" /> Recent Activity</h3>
+                <div className="flex items-center gap-1.5">
+                  <select value={activityFilter} onChange={(e) => setActivityFilter(e.target.value)} className="text-[10px] font-black bg-white border border-gray-200 rounded-lg px-2 py-1.5 outline-none">
+                    <option value="">Sab kuch</option>
+                    <option value="user.account_created">Accounts</option>
+                    <option value="room.create">Nayi listings</option>
+                    <option value="room.edit">Edits</option>
+                    <option value="contact.reveal">Number reveals</option>
+                    <option value="admin.">Admin actions</option>
+                  </select>
+                  <button onClick={() => setRefreshKey(k => k + 1)} disabled={activityLoading} className="bg-white border border-gray-200 p-1.5 rounded-lg text-gray-500 active:scale-95 disabled:opacity-60"><RefreshCw size={13} className={activityLoading ? 'animate-spin' : ''} /></button>
+                </div>
+              </div>
+              {activityLoading && activityFeed.length === 0 ? (
+                <div className="p-6 text-center text-gray-400 font-bold text-sm">Activity load ho rahi hai…</div>
+              ) : (() => {
+                const filtered = activityFilter
+                  ? activityFeed.filter(a => activityFilter === 'admin.' ? a.action.startsWith('admin.') : a.action === activityFilter)
+                  : activityFeed;
+                if (filtered.length === 0) return <div className="p-6 text-center text-gray-400 font-bold text-sm">Koi activity nahi mili.</div>;
+                return <div className="max-h-[420px] overflow-y-auto">{filtered.map(a => <ActivityRow key={a.id} item={a} />)}</div>;
+              })()}
+            </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mt-4"><div className="p-4 border-b bg-gray-50"><h3 className="font-black text-gray-800 flex items-center gap-2"><Clock size={18}/> Users & Ad Status Report</h3></div><div className="p-0 overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold border-b"><tr><th className="p-3">User/Owner</th><th className="p-3">Ad Title</th><th className="p-3 text-brand">Pay Code</th><th className="p-3">Plan</th><th className="p-3">Status</th><th className="p-3">Action</th></tr></thead><tbody className="divide-y divide-gray-100">{adminRooms.map(room => (<tr key={room._id} className="hover:bg-gray-50"><td className="p-3 font-bold text-gray-800"><div className="flex items-center gap-2"><div className="w-6 h-6 bg-brand/10 text-brand rounded-full flex justify-center items-center text-[10px] shrink-0"><User size={12}/></div>{room.ownerName || 'Owner'}</div></td><td className="p-3 text-gray-600 line-clamp-1 max-w-[150px]">{room.title}</td><td className="p-3 font-black text-brand bg-brand/5 border-x">{room.paymentCode || 'FREE'}</td><td className="p-3">{room.listingType === 'service' ? <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Briefcase size={11} /> Service {room.serviceDays || 0}D</span> : room.isPromoted ? <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold inline-flex items-center gap-1"><Star size={11} fill="currentColor" /> Promo {room.promoPlan}D</span> : <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">Regular</span>}</td><td className="p-3">{getPlanStatus(room)}</td><td className="p-3"><a href={whatsappUrl(room.mobile, `Namaste ${room.ownerName || 'Owner'}!\nRoomKhojo par aapka Ad ("${room.title}") jald hi expire hone wala hai.`) || '#'} target="_blank" rel="noreferrer" className="bg-[#25D366]/10 text-[#25D366] px-3 py-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 active:scale-95 transition-transform w-fit"><MessageCircle size={14}/> Alert</a></td></tr>))}</tbody></table></div></div>
           </div>
         )}
@@ -582,7 +687,8 @@ export default function AdminPanel() {
                         <span className={`${userStatusPill(u.status)} px-1.5 py-0.5 rounded text-[9px] font-black uppercase shrink-0`}>{u.status}</span>
                       </div>
                       <p className="text-[11px] font-bold text-gray-500 truncate">{u.email}</p>
-                      <p className="text-[10px] font-bold text-gray-400">{u.phone || 'Mobile nahi'} • {u.listingCount} listing{u.listingCount === 1 ? '' : 's'}</p>
+                      <p className="text-[10px] font-bold text-gray-400">{u.phone || 'Mobile nahi'} • {u.listingCount} listing{u.listingCount === 1 ? '' : 's'} • {u.revealCount || 0} reveal{(u.revealCount || 0) === 1 ? '' : 's'} • {u.favoriteCount || 0} fav</p>
+                      <p className="text-[9px] font-bold text-gray-400 mt-0.5 flex items-center gap-1"><Calendar size={9} /> Joined {new Date(u.createdAt).toLocaleDateString('en-IN')}{u.lastListingAt ? ` • Last listing ${timeAgo(u.lastListingAt)}` : ' • Koi listing nahi'}</p>
                     </div>
                     <div className="relative shrink-0">
                       <button onClick={(e) => { e.stopPropagation(); setUserMenuId(userMenuId === u.id ? null : u.id); }} className="p-2 rounded-full text-gray-500 bg-gray-50 active:scale-95"><MoreVertical size={18} /></button>
@@ -1002,6 +1108,12 @@ export default function AdminPanel() {
                 <div className="bg-amber-50 rounded-xl p-2 border border-amber-100"><p className="text-[10px] font-black text-amber-600 uppercase">Pending</p><p className="text-lg font-black text-amber-700">{userProfile.stats.pending}</p></div>
                 <div className="bg-purple-50 rounded-xl p-2 border border-purple-100"><p className="text-[10px] font-black text-purple-600 uppercase">Services</p><p className="text-lg font-black text-purple-700">{userProfile.stats.services}</p></div>
               </div>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="bg-cyan-50 rounded-xl p-2 border border-cyan-100"><p className="text-[10px] font-black text-cyan-600 uppercase">Reveals</p><p className="text-lg font-black text-cyan-700">{userProfile.stats.revealsTotal ?? 0}</p><p className="text-[9px] font-bold text-cyan-500">{userProfile.stats.revealsToday ?? 0} aaj</p></div>
+                <div className="bg-pink-50 rounded-xl p-2 border border-pink-100"><p className="text-[10px] font-black text-pink-600 uppercase">Favorites</p><p className="text-lg font-black text-pink-700">{userProfile.stats.favoritesTotal ?? 0}</p></div>
+                <div className="bg-blue-50 rounded-xl p-2 border border-blue-100"><p className="text-[10px] font-black text-blue-600 uppercase">Views</p><p className="text-lg font-black text-blue-700">{userProfile.stats.views ?? 0}</p></div>
+                <div className="bg-gray-50 rounded-xl p-2 border border-gray-100"><p className="text-[10px] font-black text-gray-500 uppercase">Joined</p><p className="text-[11px] font-black text-gray-700 mt-1">{new Date(userProfile.user.createdAt).toLocaleDateString('en-IN')}</p></div>
+              </div>
               <div className="flex flex-wrap gap-2">
                 {userProfile.user.status !== 'active' && <button onClick={() => changeUserStatus(userProfile.user.id, 'active')} disabled={userActionBusy} className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 disabled:opacity-60">Activate</button>}
                 {userProfile.user.status !== 'suspended' && <button onClick={() => changeUserStatus(userProfile.user.id, 'suspended')} disabled={userActionBusy} className="bg-amber-500 text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 disabled:opacity-60">Suspend</button>}
@@ -1017,11 +1129,35 @@ export default function AdminPanel() {
                         {r.image ? <img src={getImageUrl(r.image)} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" /> : <div className="w-10 h-10 rounded-lg bg-gray-200 shrink-0" />}
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-black text-gray-800 truncate">{r.title}</p>
-                          <p className="text-[10px] font-bold text-gray-500">{r.price} • {r.listingType === 'service' ? 'Service' : r.type} • {r.category}</p>
+                          <p className="text-[10px] font-bold text-gray-500">{r.price} • {r.listingType === 'service' ? 'Service' : r.type} • {r.category} • {timeAgo(r.createdAt)}</p>
                         </div>
                         <span className={`${r.isApproved && r.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded text-[9px] font-black uppercase shrink-0`}>{r.isApproved && r.isActive ? 'Live' : 'Pending'}</span>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+              {/* 📞 Reveals — kis ad ka number kab khola */}
+              <div>
+                <p className="text-xs font-black text-gray-500 uppercase mb-2 flex items-center gap-1"><Eye size={13} className="text-cyan-600" /> Number Reveals ({(userProfile.reveals || []).length})</p>
+                {(userProfile.reveals || []).length === 0 ? <p className="text-sm font-bold text-gray-400 bg-gray-50 rounded-xl p-4 text-center">Is user ne koi number reveal nahi kiya.</p> : (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    {userProfile.reveals.map(r => (
+                      <div key={r.id} className="flex items-center gap-2 bg-cyan-50/50 border border-cyan-100 rounded-lg px-2.5 py-2">
+                        <Eye size={13} className="text-cyan-600 shrink-0" />
+                        <p className="flex-1 min-w-0 text-[11px] font-bold text-gray-700 truncate">{r.roomTitle}{r.roomPrice ? ` • ₹${r.roomPrice}` : ''}</p>
+                        <span className="text-[9px] font-black text-cyan-600 shrink-0">{r.date}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* 🕘 Is user ki activity (login, listing, reveal, status) */}
+              <div>
+                <p className="text-xs font-black text-gray-500 uppercase mb-2 flex items-center gap-1"><Activity size={13} className="text-brand" /> Activity ({(userProfile.activity || []).length})</p>
+                {(userProfile.activity || []).length === 0 ? <p className="text-sm font-bold text-gray-400 bg-gray-50 rounded-xl p-4 text-center">Abhi tak koi recorded activity nahi.</p> : (
+                  <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+                    {userProfile.activity.map(a => <ActivityRow key={a.id} item={a} />)}
                   </div>
                 )}
               </div>
