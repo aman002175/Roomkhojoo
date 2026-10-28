@@ -584,11 +584,15 @@ export default function UserDashboard() {
                 return (
                     <div key={room._id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 p-3 flex flex-col gap-2 relative">
                         {/* 🚨 STATUS BANNERS */}
-                        {!room.isApproved && (
+                        {!room.isApproved && (room.rejectReason ? (
+                          <div className="absolute top-0 left-0 right-0 bg-red-500 text-white text-[10px] font-black text-center py-1 px-2 uppercase tracking-widest z-10 shadow-sm">
+                            ❌ Rejected — {room.rejectReason}
+                          </div>
+                        ) : (
                           <div className="absolute top-0 left-0 right-0 bg-yellow-400 text-yellow-900 text-[10px] font-black text-center py-1 uppercase tracking-widest z-10 shadow-sm">
                             Verification Pending (Hidden)
                           </div>
-                        )}
+                        ))}
                         {room.listingType !== 'service' && room.isApproved && isExpired && (
                           <div className="absolute top-0 left-0 right-0 bg-blue-500 text-white text-[10px] font-black text-center py-1 uppercase tracking-widest z-10 shadow-sm flex items-center justify-center gap-1">
                             <AlertTriangle size={12} /> Promo khatam — Normal ad live hai

@@ -35,6 +35,7 @@ const ACTIVITY_META = {
   'room.edit': { label: 'Listing edit ki', icon: Pencil, cls: 'bg-blue-50 text-blue-600' },
   'room.delete': { label: 'Listing delete ki', icon: Trash2, cls: 'bg-red-50 text-red-600' },
   'room.approve': { label: 'Ad approve (admin)', icon: Check, cls: 'bg-emerald-50 text-emerald-700' },
+  'room.reject': { label: 'Ad reject (admin)', icon: X, cls: 'bg-red-50 text-red-600' },
   'room.complimentary': { label: 'Complimentary VIP toggle (admin)', icon: Crown, cls: 'bg-amber-50 text-amber-600' },
   'room.toggle_status': { label: 'Listing on/off ki', icon: RefreshCw, cls: 'bg-gray-100 text-gray-600' },
   'room.reported': { label: 'Ad report hua', icon: Flag, cls: 'bg-red-50 text-red-600' },
@@ -508,6 +509,27 @@ export default function AdminPanel() {
     setRefreshKey(k => k + 1); // server truth wapas (fail par bhi state rollback)
   };
 
+  // ❌ Reject — reason owner ko dashboard banner me dikhta hai (P1 ad status feedback)
+  const handleReject = async (id) => {
+    if (actionBusy) return;
+    const reason = (window.prompt('Reject reason (owner ko yahi dikhega):') || '').trim();
+    if (!reason) return;
+    setActionBusy(id);
+    try {
+      const res = await apiFetch(`${API_URL}/${id}/reject`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...adminAuthHeaders() },
+        body: JSON.stringify({ reason })
+      });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (!res.ok || !data.success) alert(data.message || `Reject fail ho gaya (${res.status}).`);
+    } catch {
+      alert('Server connection failed — reject nahi hua.');
+    }
+    setActionBusy(null);
+    setRefreshKey(k => k + 1);
+  };
+
   // 🎁 Complimentary ON/OFF — approve ke baad bhi kabhi bhi (live ads me)
   const toggleComplimentary = async (room) => {
     if (actionBusy) return;
@@ -688,6 +710,7 @@ export default function AdminPanel() {
                     <option value="user.account_created">Accounts</option>
                     <option value="room.create">Nayi listings</option>
                     <option value="room.edit">Edits</option>
+                    <option value="room.reject">Rejections</option>
                     <option value="contact.reveal">Number reveals</option>
                     <option value="admin.">Admin actions</option>
                   </select>
@@ -839,9 +862,11 @@ export default function AdminPanel() {
                   </span>
                 </label>
                 )}
+                {room.rejectReason && (<p className="text-[10px] font-black text-red-600 bg-red-50 border border-red-100 rounded-lg px-2 py-1">❌ Aapne reject kiya: {room.rejectReason} — owner edit karke dobara bhejega</p>)}
                 <div className="flex gap-2 mt-1">
                   <button onClick={() => handleApprove(room._id, complimentaryChecked[room._id] ?? !!room.complimentary)} disabled={!!actionBusy} className="flex-1 bg-green-500 text-white py-3 rounded-xl text-sm font-black flex items-center justify-center gap-1.5 active:scale-95 transition-transform shadow-lg shadow-green-500/20 disabled:opacity-60">{actionBusy === room._id ? 'Process ho raha hai…' : (<><Check size={18} strokeWidth={3}/>{(complimentaryChecked[room._id] ?? !!room.complimentary) ? 'Approve as Complimentary VIP' : 'Verify Payment & Approve'}</>)}</button>
-                  <button onClick={() => handleDelete(room._id)} disabled={!!actionBusy} className="w-14 bg-red-50 text-red-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-red-100 disabled:opacity-60"><X size={20} strokeWidth={3}/></button>
+                  <button onClick={() => handleReject(room._id)} disabled={!!actionBusy} className="w-24 bg-red-50 text-red-600 py-3 rounded-xl text-sm font-black flex items-center justify-center gap-1 active:scale-95 transition-transform border border-red-100 disabled:opacity-60"><X size={16} strokeWidth={3}/> Reject</button>
+                  <button onClick={() => handleDelete(room._id)} disabled={!!actionBusy} className="w-14 bg-red-50 text-red-600 flex items-center justify-center rounded-xl active:scale-95 transition-transform border border-red-100 disabled:opacity-60"><Trash2 size={18}/></button>
                 </div>
               </div>
             ))

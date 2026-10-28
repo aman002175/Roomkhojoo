@@ -205,6 +205,7 @@ export default function MainApp() {
   const markersRef = useRef([]);
   const userLocMarkerRef = useRef(null); 
   const submitLockRef = useRef(false); // 🚫 double-submit guard (duplicate ads rokne ke liye)
+  const adIdemKeyRef = useRef(''); // 🚫 server-side double-submit key (retry par same, success par clear)
   const submitAbortRef = useRef(null); // 🛑 P1 #35: cancel-able submit (AbortController)
   const submitCanceledRef = useRef(false); // user ne khud cancel kiya? (timeout se farq)
   const pendingActionRef = useRef(null); // P2 #36: guest ka adhoora kaam (login ke baad resume)
@@ -691,6 +692,9 @@ export default function MainApp() {
     try {
       const fd = new FormData();
       fd.append('listingType', postKind);
+      // 🚫 P1 idempotency: retry par yahi key — server duplicate hokar pehla ad hi return karega
+      if (!adIdemKeyRef.current) adIdemKeyRef.current = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      fd.append('idempotencyKey', adIdemKeyRef.current);
       if (postKind === 'service') fd.append('serviceDays', String(serviceDaysNum));
       fd.append('title', postTitle); fd.append('price', fmtPrice(postPrice)); fd.append('category', postCategory); fd.append('type', postKind === 'service' ? 'Service' : postType); fd.append('landmark', postLandmark); fd.append('mobile', postMobile);
       fd.append('description', postKind === 'service' ? postDesc.trim() : selectedFacilities.join(', '));
@@ -722,6 +726,7 @@ export default function MainApp() {
           flyWhenReady(fresh.lng, fresh.lat, 16);
         }
         setRoomsReloadKey(k => k + 1); // 🔄 background me server se sync (source of truth)
+        adIdemKeyRef.current = ''; // ✅ ad ban gaya — agli submission nayi key legi
         resetPostForm(); // P2 #45: pura reset (pehle landmark/category/plan stale reh jate the)
       } else {
         // ⚠️ P0 fix: fail par SILENT nahi — asli reason dikhao
