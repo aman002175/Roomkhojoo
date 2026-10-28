@@ -1370,13 +1370,22 @@ export default function MainApp() {
       const r = (lat * Math.PI) / 180;
       return [((lng + 180) / 360) * s, ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * s];
     };
-    const THRESH = 110; // px
+    const THRESH = 110; // px — visual overlap
+    const NEAR_M = 50; // 🔑 sirf BILKUL pass (≤50m) wali listings cluster ho — shehar bhar ki nahi
+    const distM = (lng1, lat1, lng2, lat2) => {
+      const R = 6371000;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLng = ((lng2 - lng1) * Math.PI) / 180;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(a));
+    };
     const groups = [];
     sortedRooms.forEach(room => {
       const [x, y] = toPx(room.lng, room.lat);
-      const hit = groups.find(gr => Math.hypot(gr.x - x, gr.y - y) < THRESH);
+      // Dono condition: pin visually overlap bhi kar rahi ho AUR jagah 50m ke andar ho
+      const hit = groups.find(gr => Math.hypot(gr.x - x, gr.y - y) < THRESH && distM(gr.lng, gr.lat, room.lng, room.lat) <= NEAR_M);
       if (hit) hit.rooms.push(room);
-      else groups.push({ x, y, rooms: [room] });
+      else groups.push({ x, y, lng: room.lng, lat: room.lat, rooms: [room] });
     });
     groups.forEach(group => {
     const room = group.rooms[0];
