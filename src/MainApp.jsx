@@ -216,6 +216,8 @@ export default function MainApp() {
 
   const [view, setView] = useState('map'); 
   const [selectedRoom, setSelectedRoom] = useState(null);
+  const [clusterRooms, setClusterRooms] = useState(null); // 📍 pass-pass ki listings ka stack — tap par mini-list
+  const [mapTick, setMapTick] = useState(0); // zoom/pan par markers dobara cluster ho sakein
   // P2 #40: URL se filters restore (reload/share par reset nahi hote)
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const [activeCategory, setActiveCategory] = useState(() => {
@@ -1348,57 +1350,95 @@ export default function MainApp() {
     }
   };
 
+  // 🔁 Zoom/pan khatam hone par markers dobara build — cluster zoom-in par khud dissolve
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+    const bump = () => setMapTick(t => t + 1);
+    map.current.on('moveend', bump);
+    return () => { map.current.off('moveend', bump); };
+  }, [mapLoaded]);
+
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
     markersRef.current.forEach(m => m.remove()); markersRef.current = [];
+    // 📍 Pass-pass ki listings (jaise ek hi jagah 3-4 ad) ek hi pin me STACK — chips overlap na hon.
+    //    Pixel-based grouping: ~110px ke andar wali listings ek cluster. Zoom badhate hi
+    //    cluster khud dissolve (moveend effect dobara build karta hai).
+    const zoom = map.current.getZoom();
+    const toPx = (lng, lat) => {
+      const s = 256 * Math.pow(2, zoom);
+      const r = (lat * Math.PI) / 180;
+      return [((lng + 180) / 360) * s, ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * s];
+    };
+    const THRESH = 110; // px
+    const groups = [];
     sortedRooms.forEach(room => {
-      const isSelected = selectedRoom && selectedRoom._id === room._id;
-      const isServiceAd = room.listingType === 'service';
-      const featured = !isServiceAd && isFeatured(room);
-      const el = document.createElement('div');
-      // Select hone par: ye POP-UP (upar+zoom), baaki FADE (halke)
-      const popCls = !selectedRoom
-        ? 'active:scale-90'
-        : isSelected
-          ? '-translate-y-4 scale-125 shadow-2xl'
-          : 'opacity-40 saturate-50';
-      el.className = `flex flex-col items-center cursor-pointer ${isSelected ? 'z-40' : featured ? 'z-20' : 'z-10'}`;
-      const chip = document.createElement('div');
-      if (isServiceAd) {
-        // Advertisement = red capsule with business/service name (not a room pin).
-        chip.className = `max-w-[180px] font-black px-3 py-1.5 rounded-full shadow-lg border-2 border-white text-[11px] transition-all duration-300 flex items-center gap-1 bg-red-600 text-white ${popCls}`;
-        const label = document.createElement('span');
-        label.className = 'block min-w-0 truncate';
-        label.textContent = room.title || 'Advertisement';
-        chip.title = room.title || 'Advertisement';
-        chip.appendChild(label);
-      } else {
-        chip.className = `font-bold px-3 py-1.5 rounded-full shadow-lg border-2 border-white text-xs transition-all duration-300 flex items-center gap-1 ${featured ? 'bg-orange-500 text-white' : 'bg-green-600 text-white'} ${popCls}`;
-        // Static SVG icon (category/star) + textContent price (user-data kabhi innerHTML me nahi — XSS-safe)
-        chip.innerHTML = featured ? ICON_STAR : markerIcon(room.category);
-        const sp = document.createElement('span');
-        sp.textContent = room.price;
-        chip.appendChild(sp);
-      }
-      const dot = document.createElement('div');
-      dot.className = `w-2 h-2 rounded-full border border-white shadow-md ${isServiceAd ? 'bg-red-600' : featured ? 'bg-orange-500' : 'bg-green-600'}`;
-      dot.style.marginBottom = '-4px';
-      el.appendChild(chip); el.appendChild(dot);
-      // P2 #46: touchstart ke BAAD click bhi fire hota hai — dedupe (warna popup 2x khulta)
-      let lastTapAt = 0;
-      const onClick = (e) => {
-        e.stopPropagation();
-        const now = Date.now();
-        if (now - lastTapAt < 400) return;
-        lastTapAt = now;
-        mapUserMovedRef.current = true;
-        openRoomPopup(room);
-        if (map.current) map.current.flyTo({ center: [room.lng, room.lat], zoom: 15.5 });
-      };
-      el.addEventListener('click', onClick); el.addEventListener('touchstart', onClick);
-      const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([room.lng, room.lat]).addTo(map.current); markersRef.current.push(marker);
+      const [x, y] = toPx(room.lng, room.lat);
+      const hit = groups.find(gr => Math.hypot(gr.x - x, gr.y - y) < THRESH);
+      if (hit) hit.rooms.push(room);
+      else groups.push({ x, y, rooms: [room] });
     });
-  }, [sortedRooms, selectedRoom, mapLoaded]);
+    groups.forEach(group => {
+    const room = group.rooms[0];
+    const isCluster = group.rooms.length > 1;
+    const inCluster = isCluster && selectedRoom && group.rooms.some(r => r._id === selectedRoom._id);
+    const isSelected = !isCluster && selectedRoom && selectedRoom._id === room._id;
+    const isServiceAd = room.listingType === 'service';
+    const featured = !isServiceAd && isFeatured(room);
+    const el = document.createElement('div');
+    // Select hone par: ye POP-UP (upar+zoom), baaki FADE (halke)
+    const popCls = !selectedRoom
+      ? 'active:scale-90'
+      : (isSelected || inCluster)
+        ? '-translate-y-4 scale-125 shadow-2xl'
+        : 'opacity-40 saturate-50';
+    el.className = `flex flex-col items-center cursor-pointer ${(isSelected || inCluster) ? 'z-40' : featured ? 'z-20' : 'z-10'}`;
+    const chip = document.createElement('div');
+    if (isCluster) {
+      // Stacked look (neeche 2 layer) + count — tap par us jagah ki saari listings
+      chip.className = `font-bold px-3 py-1.5 rounded-full border-2 border-white text-xs transition-all duration-300 flex items-center gap-1 bg-emerald-700 text-white ${popCls}`;
+      chip.style.boxShadow = '0 5px 0 -1px #047857, 0 9px 0 -2px #065f46, 0 14px 24px rgba(0,0,0,0.18)';
+      chip.innerHTML = markerIcon(room.category);
+      const sp = document.createElement('span');
+      sp.textContent = `${group.rooms.length} listings`;
+      chip.appendChild(sp);
+      chip.title = `${group.rooms.length} listings — tap karke dekhein`;
+    } else if (isServiceAd) {
+      // Advertisement = red capsule with business/service name (not a room pin).
+      chip.className = `max-w-[180px] font-black px-3 py-1.5 rounded-full shadow-lg border-2 border-white text-[11px] transition-all duration-300 flex items-center gap-1 bg-red-600 text-white ${popCls}`;
+      const label = document.createElement('span');
+      label.className = 'block min-w-0 truncate';
+      label.textContent = room.title || 'Advertisement';
+      chip.title = room.title || 'Advertisement';
+      chip.appendChild(label);
+    } else {
+      chip.className = `font-bold px-3 py-1.5 rounded-full shadow-lg border-2 border-white text-xs transition-all duration-300 flex items-center gap-1 ${featured ? 'bg-orange-500 text-white' : 'bg-green-600 text-white'} ${popCls}`;
+      // Static SVG icon (category/star) + textContent price (user-data kabhi innerHTML me nahi — XSS-safe)
+      chip.innerHTML = featured ? ICON_STAR : markerIcon(room.category);
+      const sp = document.createElement('span');
+      sp.textContent = room.price;
+      chip.appendChild(sp);
+    }
+    const dot = document.createElement('div');
+    dot.className = `w-2 h-2 rounded-full border border-white shadow-md ${isCluster ? 'bg-emerald-700' : isServiceAd ? 'bg-red-600' : featured ? 'bg-orange-500' : 'bg-green-600'}`;
+    dot.style.marginBottom = '-4px';
+    el.appendChild(chip); el.appendChild(dot);
+    // P2 #46: touchstart ke BAAD click bhi fire hota hai — dedupe (warna popup 2x khulta)
+    let lastTapAt = 0;
+    const onClick = (e) => {
+      e.stopPropagation();
+      const now = Date.now();
+      if (now - lastTapAt < 400) return;
+      lastTapAt = now;
+      mapUserMovedRef.current = true;
+      if (isCluster) { setClusterRooms(group.rooms); return; }
+      openRoomPopup(room);
+      if (map.current) map.current.flyTo({ center: [room.lng, room.lat], zoom: 15.5 });
+    };
+    el.addEventListener('click', onClick); el.addEventListener('touchstart', onClick);
+    const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([room.lng, room.lat]).addTo(map.current); markersRef.current.push(marker);
+    });
+  }, [sortedRooms, selectedRoom, mapLoaded, mapTick]);
 
   const openPostAdForm = (kind = 'room') => {
     const nextKind = kind === 'service' ? 'service' : 'room';
@@ -1734,6 +1774,36 @@ export default function MainApp() {
             <Loader2 size={36} className="animate-spin text-brand" />
             <p className="font-black text-base text-gray-800 text-center">Getting mobile number…</p>
             <p className="text-[11px] font-bold text-gray-400 text-center -mt-1">Number reveal ho raha hai — ek second</p>
+          </div>
+        </div>
+      )}
+
+      {/* 📍 Cluster mini-list — stack wali pin (ek jagah N listings) par tap */}
+      {clusterRooms && clusterRooms.length > 0 && (
+        <div className="fixed inset-0 z-[8700] bg-black/50 backdrop-blur-[1px] flex items-end justify-center" onClick={() => setClusterRooms(null)}>
+          <div className="bg-white w-full max-w-lg rounded-t-3xl max-h-[70dvh] overflow-y-auto p-4 pb-8 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <h3 className="font-black text-lg text-gray-800">Yahan {clusterRooms.length} listings hain</h3>
+                <p className="text-[11px] font-bold text-gray-400">Ek chun kar detail dekhein — zoom in karne par pins alag bhi ho jayengi</p>
+              </div>
+              <button onClick={() => setClusterRooms(null)} className="bg-gray-100 p-2 rounded-full shrink-0 active:scale-90" aria-label="Close listings"><X size={18} /></button>
+            </div>
+            <div className="space-y-2">
+              {clusterRooms.map(r => (
+                <button key={r._id} onClick={() => { setClusterRooms(null); openRoomPopup(r); }} className="w-full flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-2xl p-3 text-left active:scale-[0.98] transition-transform">
+                  <img src={getImageUrl(r.image)} className="w-12 h-12 rounded-xl object-cover bg-gray-200 shrink-0" alt="" loading="lazy" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-black text-sm text-gray-800 truncate">{r.title}</p>
+                    <p className="text-[11px] font-bold text-gray-500 truncate">{r.landmark || r.category} • {r.type}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-brand font-black text-sm">{r.price}</p>
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-brand/10 text-brand">{r.listingType === 'service' ? 'Ad' : r.category}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
