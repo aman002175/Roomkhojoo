@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { jwtDecode } from 'jwt-decode';
 import * as maplibregl from 'maplibre-gl'; // v6 ESM-only: namespace import (default import hata)
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { X, Phone, MessageCircle, Map as MapIcon, List, Plus, Camera, Target, Info, FileText, Shield, ChevronRight, Menu, User, MapPin, Lock, Search, Navigation, Loader2, AlertTriangle, Heart, Share2, Megaphone, Landmark, TrainFront, Bus, Hospital, Stethoscope, GraduationCap, School, BookOpen, Star, Satellite, Ruler, RefreshCw, Send, Copy, Home, Users, Building2, Briefcase, Hotel, Check, Tag, Image as ImageIcon, LifeBuoy, LogOut } from 'lucide-react';
+import { X, Phone, MessageCircle, Map as MapIcon, List, Plus, Camera, Target, Info, FileText, Shield, ChevronRight, Menu, User, MapPin, Lock, Search, Navigation, Loader2, AlertTriangle, Heart, Share2, Megaphone, Landmark, TrainFront, Bus, Hospital, Stethoscope, GraduationCap, School, BookOpen, Star, Satellite, Ruler, Send, Copy, Home, Users, Building2, Briefcase, Hotel, Check, Tag, Image as ImageIcon, LifeBuoy, LogOut } from 'lucide-react';
 import { markerIcon, ICON_STAR } from './markerIcons';
 import AuthModal from './AuthModal';
 import { apiFetch } from './apiFetch'; // P1 #31/#32: timeout + 401 auto-logout (sab calls)
@@ -339,7 +339,7 @@ export default function MainApp() {
   };
 
   const [sysSettings, setSysSettings] = useState({
-    categories: ['PG', 'Flat', 'Hostel', 'Library', 'Office'],
+    categories: ['PG', 'Flat', 'Room', 'Hostel', 'Library', 'Office'],
     pricing: { regular: '0', promo7: '299', promo15: '499', promo30: '899', upiId: 'admin@ybl', bannerPrice: '499', bannerDays: '7', serviceDailyRate: '0' }
   });
 
@@ -1458,7 +1458,12 @@ export default function MainApp() {
     setIsPickingLocation(true);
     setView('map');
     setGpsAccuracy(null);
-    handleLiveLocation(true);
+    // 📍 Auto-GPS band: map apni location khud nahi dhoondhega — user chune.
+    //    "My Location" button se GPS, ya khud drag karke pin → Confirm.
+    //    Sirf pehle se chune gaye pin par center hota hai; naye user ka map jahan hai wahi rehta hai.
+    try {
+      if (postLat && postLng && map.current) map.current.flyTo({ center: [postLng, postLat], zoom: Math.max(map.current.getZoom(), 15), duration: 700 });
+    } catch { /* map ready nahi — koi baat nahi, wahi view me khulega */ }
   };
 
   const cancelPickingLocation = () => {
@@ -1616,7 +1621,7 @@ export default function MainApp() {
               </svg>
             </div>
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 mt-2 bg-white px-4 py-1 rounded-full shadow-md text-xs font-bold text-gray-700">
-              {isLocating ? 'Finding Your Current Location…' : gpsAccuracy ? `GPS ±${gpsAccuracy}m — drag karke adjust karein` : 'Drag map to pin'}
+              {isLocating ? 'Finding Your Current Location…' : gpsAccuracy ? `GPS ±${gpsAccuracy}m — drag karke adjust karein` : 'Drag map to pin — ya "My Location" button dabayein'}
             </div>
           </div>
         )}
@@ -1786,8 +1791,8 @@ export default function MainApp() {
               ) : (
                <div><p className="text-xs font-black text-gray-500 mb-2 uppercase">Select Facilities</p><div className="flex flex-wrap gap-2">{(sysSettings.facilities || []).map(fac => (<button type="button" key={fac} onClick={() => setSelectedFacilities(prev => prev.includes(fac) ? prev.filter(f => f !== fac) : [...prev, fac])} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${selectedFacilities.includes(fac) ? 'bg-brand text-white border-brand shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>{fac}</button>))}</div></div>
              )}
-              <div className="flex flex-wrap gap-2 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 min-w-[140px] p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button onClick={refreshGpsPin} disabled={isLocating} title="GPS se refresh" className="p-3 shrink-0 rounded-2xl font-black text-xs flex items-center justify-center border-2 bg-gray-50 text-gray-600 border-gray-200 active:scale-95 disabled:opacity-60">{isLocating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button><button onClick={startPickingLocation} className={`p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLocationConfirmed ? 'bg-green-50 text-green-600 border-green-200' : postLng ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={16}/> {postLocationConfirmed ? (gpsAccuracy ? `Pinned! ±${gpsAccuracy}m` : 'Pinned!') : postLng ? 'Confirm' : 'Map'}</button><button onClick={openPoiPicker} className="p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={16} /> Nearby</button></div>
-              {(!postLocationConfirmed || postLandmark.trim().length < 2) && (<p className="mt-1.5 ml-1 text-[11px] font-bold text-amber-700">Payment/publish se pehle Map pin karke <span className="font-black">Confirm Location</span> karein aur landmark/location likhein.</p>)}
+              <div className="flex flex-wrap gap-2 mt-2"><input type="text" value={postLandmark} onChange={(e) => setPostLandmark(e.target.value)} placeholder="Landmark" className="flex-1 min-w-[140px] p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm"/><button type="button" onClick={refreshGpsPin} disabled={isLocating} title="Meri current location GPS se lagayein" className="p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 bg-emerald-50 text-emerald-700 border-emerald-200 active:scale-95 disabled:opacity-60">{isLocating ? <Loader2 size={15} className="animate-spin" /> : <Navigation size={15} fill="currentColor" />} Meri Location</button><button onClick={startPickingLocation} title="Map par pin drag karke location chunein" className={`p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors ${postLocationConfirmed ? 'bg-green-50 text-green-600 border-green-200' : postLng ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-blue-50 text-blue-600 border-blue-200'}`}><Target size={15}/> {postLocationConfirmed ? (gpsAccuracy ? `Pinned! ±${gpsAccuracy}m` : 'Pinned!') : postLng ? 'Confirm Pin' : 'Map Pin'}</button><button onClick={openPoiPicker} className="p-3 shrink-0 whitespace-nowrap rounded-2xl font-black text-xs flex items-center justify-center gap-1 border-2 transition-colors bg-purple-50 text-purple-700 border-purple-200 active:scale-95"><Landmark size={15} /> Nearby</button></div>
+              {(!postLocationConfirmed || postLandmark.trim().length < 2) && (<p className="mt-1.5 ml-1 text-[11px] font-bold text-amber-700">Location chunein: <span className="font-black">📍 Meri Location</span> (GPS se apni jagah) dabaayein, ya <span className="font-black">🗺️ Map Pin</span> khol kar pin drag karke <span className="font-black">Confirm Pin</span> karein — dono me se ek zaroori hai. Landmark bhi likhein.</p>)}
               <div>
                 <input type="url" value={postMapUrl} onChange={(e) => setPostMapUrl(e.target.value)} placeholder="Google Maps link (optional)" className="w-full p-4 bg-gray-50 rounded-2xl outline-none font-bold text-sm" />
                 <p className="text-[10px] font-bold text-gray-400 mt-1 ml-1">Google Maps par apni jagah kholo → Share link → yahan paste karo. Location isi link se set hogi (zyada accurate).</p>
